@@ -7,7 +7,7 @@ export const FEATURES = Object.freeze([
 export const FEATURE_ROLES = ['appointment_setter','salesperson'];
 export function featureRole(role){return role==='canvasser'?'appointment_setter':role;}
 export function featureAllowed(rows,role,key){
-  if(['admin','manager'].includes(role))return true;
+  if(['admin','manager','owner'].includes(role))return true;
   if(!FEATURES.some(([id])=>id===key))return false;
   const row=rows.find(row=>row.role===featureRole(role)&&row.feature===key);
   return row ? row.enabled===true : key!=='photos'||role==='salesperson';

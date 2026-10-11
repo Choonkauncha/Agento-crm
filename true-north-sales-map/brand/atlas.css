@@ -1120,6 +1120,12 @@ body.tn-workspace .doorSheetFooter {
   background: var(--atlas-surface);
   border-color: var(--atlas-line);
 }
+body.tn-workspace .doorSheetAnswer,
+body.tn-map-workspace .pinPopup .pinPopupAnswer {
+  background: var(--atlas-raised);
+  color: var(--atlas-text);
+  border-color: var(--atlas-line-strong);
+}
 body.tn-workspace .doorSheetFooter .tnDoorActions .tnTap {
   background: var(--atlas-raised);
   color: var(--atlas-text);
@@ -1918,4 +1924,24 @@ body.tn-workspace .tnPrintSheet a {
   .atlasCommand {
     display: none !important;
   }
+}
+
+/* House pin popup: keep its three controls readable on the light sheet/popup surface. */
+body.tn-workspace .doorSheetFooter .doorSheetRoute,
+body.tn-map-workspace .pinPopup .pinPopupTitle {
+  color: #14283f;
+}
+body.tn-map-workspace .pinPopup .routeToggle {
+  background: #fff;
+  color: #14283f;
+  border-color: #c5d0d6;
+}
+body.tn-workspace .doorSheetFooter .doorSheetRoute {
+  background: #fff;
+  border-color: #c5d0d6;
+}
+body.tn-workspace .doorSheetFooter a.doorSheetForm,
+body.tn-map-workspace .pinPopup a.popupForm {
+  background: #1766d6;
+  color: #fff;
 }

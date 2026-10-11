@@ -135,6 +135,39 @@ kbd{font-size:9px;line-height:1;border:1px solid rgba(255,255,255,.24);border-bo
 .doorSheetBook{display:flex;align-items:center;justify-content:center;min-height:56px;border-radius:14px;background:var(--orange);color:#fff;font-size:18px;font-weight:900;text-decoration:none;letter-spacing:.2px;box-shadow:0 8px 18px rgba(30,107,255,.35);touch-action:manipulation}
 .doorSheetBook:hover{filter:brightness(1.04)}
 .doorSheetBook:active{transform:scale(.985)}
+.doorSheetAnswerLabel{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.doorSheetAnswer{display:block;width:100%;min-height:52px;padding:0 14px;border-radius:12px;border:1px solid #c5d0d6;background:#fff;color:var(--navy);font-size:16px;font-weight:800;cursor:pointer}
+.doorSheetFooter .doorSheetRoute{margin-top:0}
+.doorSheetForm{display:flex;align-items:center;justify-content:center;min-height:56px;border-radius:14px;background:var(--orange);color:#fff;font-size:18px;font-weight:900;text-decoration:none;letter-spacing:.2px;box-shadow:0 8px 18px rgba(30,107,255,.35);touch-action:manipulation}
+.doorSheetForm:active{transform:scale(.985)}
+.doorSheetAnswer:focus-visible,.doorSheetForm:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
+.pinPopup .pinPopupTitle{display:block;font-size:13px}
+.pinPopup .pinPopupAnswer{display:block;width:100%;min-height:44px;margin-top:8px;padding:0 8px;border:1px solid #ccd5ca;border-radius:7px;background:#fff;color:var(--navy);font-weight:800;font-size:15px}
+.pinPopup .popupActions>*{flex:1 1 0;justify-content:center}
+.pinPopup .popupForm{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 10px;border-radius:7px;background:var(--orange);color:#fff;font-weight:900;text-decoration:none}
+.pinPopup .routeToggle{min-height:44px}
+.routePinBadge{background:transparent;border:0}
+.routePinBadge span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 4px;border-radius:999px;background:#0d5c2e;color:#fff;border:2px solid #fff;font-size:12px;font-weight:900;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+.routeForBanner{position:absolute;z-index:800;left:16px;right:16px;top:86px;display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:none;margin:0;padding:10px 12px;border-radius:14px;background:#0c1424;color:#fff;box-shadow:0 10px 28px rgba(8,22,29,.35)}
+.routeForBanner p{margin:0;color:#fff;font-size:16px;font-weight:800;line-height:1.3}
+.routeForBannerActions{display:flex;gap:8px;flex:none}
+.routeForBannerActions button{min-height:44px;min-width:88px;border:0;border-radius:12px;font-size:16px;font-weight:900;cursor:pointer}
+#routeForDone{background:#1e6bff;color:#fff}
+#routeForCancel{background:#fff;color:#0c1424}
+.routeForCard{width:min(480px,100%)}
+.routeForList{display:grid;gap:8px;margin-top:12px;max-height:50vh;overflow:auto}
+.routeForList button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:8px 12px;border:1px solid #c5d0d6;border-radius:12px;background:#fff;color:var(--navy);font-size:16px;font-weight:800;text-align:left;cursor:pointer}
+.routeForList button span{color:#4d6070;font-size:13px;font-weight:700}
+.assignedRouteList{display:grid;gap:8px;width:100%;margin-top:8px}
+.assignedRouteRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.assignedRouteRow span{display:grid;flex:1;min-width:140px}
+.assignedRouteRow small{color:#4d6070;font-weight:700}
+.assignedRouteRow button{min-height:44px;padding:0 12px;border:1px solid #c5d0d6;border-radius:10px;background:#fff;color:#0c1424;font-weight:800;cursor:pointer}
+.routeTray .assignedRouteRow span{font-size:14px;color:#fff}
+.routeTray .assignedRouteRow small{color:#d7e6ee;font-size:12px}
+.routeTray #routeForBtn{background:#1e6bff;color:#fff;border:0}
+.toastActions:has(#toastNext.hidden){grid-template-columns:1fr}
+.toast p{overflow-wrap:anywhere}
 .doorStatus:focus-visible,.doorSheetBook:focus-visible,.doorSheetClose:focus-visible,.doorSheetFull:focus-visible,.doorSheetRoute:focus-visible,#toastUndo:focus-visible,#toastNext:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
 .toast{left:8px;right:8px;width:auto;max-width:480px;margin:0 auto;bottom:16px;transform:translateY(16px);z-index:1800;pointer-events:none;padding:12px 12px 10px;border-radius:16px;font-size:15px}
 .toast.show{opacity:1;transform:translateY(0);pointer-events:auto}
@@ -191,7 +224,7 @@ kbd{font-size:9px;line-height:1;border:1px solid rgba(255,255,255,.24);border-bo
   .mapLegend.isOpen{display:flex}
   .routeTray{bottom:calc(var(--list-sheet-peek) + 8px);left:8px;right:8px;transform:none;min-width:0;width:auto;align-items:stretch;flex-direction:column}
   .routeTrayActions{width:100%;display:grid;grid-template-columns:1fr 1fr}
-  .routeTrayActions #stormHousesBtn,.routeTrayActions #routeTrayBtn,.routeTrayActions #startRouteBtn,.routeTrayActions #navChoiceBtn{grid-column:1 / -1}
+  .routeTrayActions #stormHousesBtn,.routeTrayActions #routeTrayBtn,.routeTrayActions #startRouteBtn,.routeTrayActions #navChoiceBtn,.routeTrayActions #routeForBtn{grid-column:1 / -1}
   .routeTray button,.routeTray .routeModeToggle button{min-height:44px;font-size:14px}
   .routeTray .routeModeToggle{width:100%}
   .routeTray .routeModeToggle button{flex:1}
@@ -258,6 +291,7 @@ kbd{font-size:9px;line-height:1;border:1px solid rgba(255,255,255,.24);border-bo
 .leaflet-radar-pane{pointer-events:none}
 @media(max-width:960px){
   .weatherStack{top:118px;left:8px;right:8px;width:auto}
+  .routeForBanner{top:78px}
 }
 
 /* Collapsible route tray */

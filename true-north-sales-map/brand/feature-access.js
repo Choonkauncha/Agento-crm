@@ -1,16 +1,20 @@
 import {FEATURES,featureAllowed} from '../lib/features.js';
 let current=null;
 function denyAccess(role='',{pending=false}={}){
-  current={pending,role:role==='admin'||role==='manager'?'':role,rows:FEATURES.map(([feature])=>({role:role==='canvasser'?'appointment_setter':role==='admin'||role==='manager'?'':role,feature,enabled:false}))};
+  const management=['admin','manager','owner'].includes(role);
+  const storedRole=management&&pending?'':role;
+  const rowRole=role==='canvasser'?'appointment_setter':management?'':role;
+  current={pending,role:storedRole,rows:FEATURES.map(([feature])=>({role:rowRole,feature,enabled:false}))};
   apply();
   document.dispatchEvent(new CustomEvent('tn-feature-access',{detail:pending?{pending:true}:{coach:false,pending:false}}));
 }
-const selectors={map:'[data-workspace-link="map"]',routes:'#routeBtn,#mobileRoute,#routeTray,#navBar,#doorSheetRoute,.rowCheck',weather:'#weatherStack',intake:'[data-workspace-link="intake"],a[href="/setter.html"]',forms:'[data-workspace-link="forms"],a[href="/forms.html"]',photos:'[data-workspace-link="photos"],#roofPhotosLink,a[href="/rep.html"]',training:'[data-workspace-link="training"],a[href="/training.html"]',coach:'#tnCoachPanel,#tnCoachTab,.tnCoachCard,[data-training-tab="coach"],[data-tab="coach"]',shifts:'[data-workspace-link="shifts"],.tnShiftsLink,#tnClockBtn',messages:'.tnMessagesBtn,#messagesBtn,#messageBtn,#tnMsgBtn,[data-tn-action="message"]',account:'[data-workspace-link="account"],a[href="/account.html"]'};
+const selectors={map:'[data-workspace-link="map"]',routes:'#routeBtn,#mobileRoute,#routeTray,#navBar,#doorSheetRoute,.rowCheck,#routeForBtn,#assignedRouteList,#routeForBanner',weather:'#weatherStack',intake:'[data-workspace-link="intake"],a[href="/setter.html"]',forms:'[data-workspace-link="forms"],a[href="/forms.html"],#doorSheetForm,.popupForm',photos:'[data-workspace-link="photos"],#roofPhotosLink,a[href="/rep.html"]',training:'[data-workspace-link="training"],a[href="/training.html"]',coach:'#tnCoachPanel,#tnCoachTab,.tnCoachCard,[data-training-tab="coach"],[data-tab="coach"]',shifts:'[data-workspace-link="shifts"],.tnShiftsLink,#tnClockBtn',messages:'.tnMessagesBtn,#messagesBtn,#messageBtn,#tnMsgBtn,[data-tn-action="message"]',account:'[data-workspace-link="account"],a[href="/account.html"]'};
 function apply(){
   if(!current)return;
-  window.tnFeatureAllowed=key=>featureAllowed(current.rows,current.role,key);
+  const localRoutes=document.documentElement.dataset.localRoutes==='1';
+  window.tnFeatureAllowed=key=>localRoutes&&(key==='routes'||key==='map')?true:featureAllowed(current.rows,current.role,key);
   for(const [key] of FEATURES)document.querySelectorAll(selectors[key]||'___').forEach(el=>{
-    const off=!featureAllowed(current.rows,current.role,key);
+    const off=!window.tnFeatureAllowed(key);
     if(off)el.setAttribute('data-feature-disabled','');else el.removeAttribute('data-feature-disabled');
   });
   if(!current.pending&&!featureAllowed(current.rows,current.role,'coach')&&document.getElementById('tnCoachTab')?.getAttribute('aria-selected')==='true')document.getElementById('tnLessonsTab')?.click();
