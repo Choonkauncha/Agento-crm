@@ -22,6 +22,10 @@ import { createDeferredAuthHandler } from './lib/auth-events.js';
 
 const STATUS_OPTIONS=['New','Knocked','No Answer','Interested','Appointment','Not Interested','Do Not Knock'];
 const DOOR_STATUSES=['Knocked','No Answer','Interested','Not Interested','Do Not Knock'].filter(s=>STATUS_OPTIONS.includes(s));
+// House-pin popup answer dropdown: label -> saved lead status.
+const DOOR_ANSWERS=[['Answered','Knocked'],['Not answered','No Answer']];
+function doorAnswerOptions(current){return `<option value="" ${DOOR_ANSWERS.some(([,v])=>v===current)?'':'selected'}>Did they answer?</option>`+DOOR_ANSWERS.map(([label,value])=>`<option value="${esc(value)}" ${current===value?'selected':''}>${esc(label)}</option>`).join('');}
+function houseFormHref(l){const q=new URLSearchParams();if(l?.id)q.set('lead',l.id);if(l?.name)q.set('name',l.name);if(l?.address)q.set('address',l.address);if(l?.city)q.set('city',l.city);if(l?.state)q.set('state',l.state);if(l?.zip)q.set('zip',l.zip);const qs=q.toString();return `/forms.html${qs?`?${qs}`:''}`;}
 const doorSheetMedia=window.matchMedia('(max-width: 960px)');
 const HOME_BASE={lat:40.3931,lng:-82.4857};
 const HOME_MILES=35;
@@ -262,7 +266,7 @@ function bindStaticEvents(){
   $('closeReceipt')?.addEventListener('click',()=>$('receiptModal')?.classList.add('hidden'));
   $('doorSheetClose').onclick=closeDoorSheet;
   $('doorSheetScrim').onclick=closeDoorSheet;
-  $('doorSheetFull').onclick=()=>{const id=state.doorLeadId; closeDoorSheet(); if(id) openLead(id,{full:true});};
+  $('doorSheetAnswer').onchange=()=>{const id=state.doorLeadId,value=$('doorSheetAnswer').value;if(id&&value)applyDoorStatus(id,value);};
   $('toastUndo').onclick=undoDoorStatus;
   $('toastNext').onclick=()=>openNextHouse(state.doorUndo?.id);
   $('homeAreaBtn').onclick=()=>setHomeArea(true);
@@ -790,15 +794,16 @@ function scrubPrivateMap(){
   state.tileLayer=null;
   state.routeLine=null;
   state.userMarker=null;
-  ['workList','handoffList','teamList','routeStops','stats','drawerContent','doorSheetActions'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=''; });
-  ['doorSheetAddress','doorSheetName','doorSheetPlace','doorSheetStatus','toastText','userIdentity','datasetCount','mapInfoCount','mapInfoNext','search'].forEach(id=>{
+  ['workList','handoffList','teamList','routeStops','stats','drawerContent'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=''; });
+  ['doorSheetAddress','toastText','userIdentity','datasetCount','mapInfoCount','mapInfoNext','search'].forEach(id=>{
     const el=$(id);
     if(!el) return;
     if(el.tagName==='INPUT' || el.tagName==='TEXTAREA') el.value='';
     else el.textContent='';
   });
   ['drawer','doorSheet','navBar','routePanel','appointmentModal','adminModal','postSignIn','navChoice'].forEach(id=>$(id)?.classList.add('hidden'));
-  const book=$('doorSheetBook'); if(book) book.setAttribute('href','/setter.html');
+  const form=$('doorSheetForm'); if(form) form.setAttribute('href','/forms.html');
+  const answer=$('doorSheetAnswer'); if(answer) answer.value='';
   document.getElementById('tnFieldOps')?.remove();
   document.getElementById('tnMsgOverlay')?.remove();
   $('userMenu')?.classList.add('hidden');
@@ -1180,13 +1185,14 @@ function stylePin(marker, lead){
 }
 function pinPopupHtml(lead){
   const s=leadStatus(lead);
-  return `<div class="pinPopup"><b>${esc(lead.name||'Property lead')}</b><div>${esc(lead.address)}, ${esc(lead.city)}</div><div class="popupLine"><span class="miniBadge">${esc(s)}</span><b>${scoreLead(lead)} pts</b></div><div class="popupActions"><button type="button" class="routeToggle" data-popup-route="${esc(lead.id)}">${routeToggleLabel(state.selected.has(lead.id))}</button><button type="button" data-popup-lead="${esc(lead.id)}">Open lead</button></div></div>`;
+  return `<div class="pinPopup"><b class="pinPopupTitle">${esc(lead.address||'Property lead')}</b><select class="pinPopupAnswer" data-popup-answer="${esc(lead.id)}" aria-label="Did they answer?">${doorAnswerOptions(s)}</select><div class="popupActions"><button type="button" class="routeToggle" data-popup-route="${esc(lead.id)}">${routeToggleLabel(state.selected.has(lead.id))}</button><a class="popupForm" href="${esc(houseFormHref(lead))}">File form</a></div></div>`;
 }
 function bindPinPopup(lead){
   setTimeout(()=>{
     const routeBtn=document.querySelector(`[data-popup-route="${CSS.escape(lead.id)}"]`);
     routeBtn?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();toggleSelected(lead.id);if(routeBtn)routeBtn.textContent=routeToggleLabel(state.selected.has(lead.id));stylePin(state.pinMarkers.get(lead.id), lead)});
-    document.querySelector(`[data-popup-lead="${CSS.escape(lead.id)}"]`)?.addEventListener('click',()=>openLead(lead.id));
+    const answer=document.querySelector(`[data-popup-answer="${CSS.escape(lead.id)}"]`);
+    answer?.addEventListener('change',()=>{if(answer.value)applyDoorStatus(lead.id,answer.value);});
   },0);
 }
 function ensurePin(lead){
@@ -1496,17 +1502,11 @@ function openDoorSheet(id){
   state.map?.closePopup();
   const s=leadStatus(l);
   $('doorSheetAddress').textContent=l.address||'Property lead';
-  const nameEl=$('doorSheetName');
-  nameEl.textContent=l.name||'';
-  nameEl.classList.toggle('hidden',!l.name);
-  $('doorSheetPlace').textContent=[l.city,l.state,l.zip].filter(Boolean).join(', ');
-  const badge=$('doorSheetStatus');
-  badge.textContent=s;
-  badge.className=`status ${statusClass(s)}`;
-  $('doorSheetBook').href=`/setter.html?lead=${encodeURIComponent(l.id)}`;
+  $('doorSheetForm').href=houseFormHref(l);
   $('doorSheetRoute').textContent=routeToggleLabel(state.selected.has(l.id));
-  $('doorSheetActions').innerHTML=DOOR_STATUSES.map(status=>`<button type="button" class="doorStatus doorStatus-${statusClass(status)}${s===status?' isCurrent':''}" data-door-status="${esc(status)}" aria-pressed="${s===status?'true':'false'}"><span class="doorStatusDot" aria-hidden="true"></span><span>${esc(status)}</span></button>`).join('');
-  $('doorSheetActions').querySelectorAll('[data-door-status]').forEach(btn=>{btn.onclick=()=>applyDoorStatus(l.id,btn.dataset.doorStatus);});
+  const answer=$('doorSheetAnswer');
+  answer.innerHTML=doorAnswerOptions(s);
+  answer.disabled=false;
   const sheet=$('doorSheet');
   const card=$('doorSheetCard');
   card.style.transform='';
@@ -1622,16 +1622,15 @@ async function applyDoorStatus(id,status){
   const previous=leadStatus(l);
   if(previous===status){renderAll();closeDoorSheet();toast(`Already ${status} · ${l.address}`);maybeAdvanceNav(id);return;}
   state.doorSaving=true;
-  const buttons=[...$('doorSheetActions').querySelectorAll('button')];
-  buttons.forEach(b=>{b.disabled=true;});
-  const tapped=buttons.find(b=>b.dataset.doorStatus===status);
-  const label=tapped?.querySelector('span:last-child');
-  if(label) label.textContent='Saving…';
+  const selects=[$('doorSheetAnswer'),...document.querySelectorAll(`[data-popup-answer="${CSS.escape(id)}"]`)].filter(Boolean);
+  selects.forEach(sel=>{sel.disabled=true;});
   try{await persistLeadPatch(l,{status});}
-  catch{state.doorSaving=false;buttons.forEach(b=>{b.disabled=false;});if(label) label.textContent=status;return;}
+  catch{state.doorSaving=false;selects.forEach(sel=>{sel.disabled=false;sel.value=DOOR_ANSWERS.some(([,v])=>v===previous)?previous:'';});return;}
   state.doorSaving=false;
+  selects.forEach(sel=>{sel.disabled=false;});
   renderAll();
   closeDoorSheet();
+  state.map?.closePopup();
   toastDoorResult(l, previous, status);
   maybeAdvanceNav(id);
 }
