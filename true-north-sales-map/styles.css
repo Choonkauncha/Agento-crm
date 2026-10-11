@@ -148,8 +148,8 @@ kbd{font-size:9px;line-height:1;border:1px solid rgba(255,255,255,.24);border-bo
 .pinPopup .routeToggle{min-height:44px}
 .routePinBadge{background:transparent;border:0}
 .routePinBadge span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 4px;border-radius:999px;background:#0d5c2e;color:#fff;border:2px solid #fff;font-size:12px;font-weight:900;box-shadow:0 2px 6px rgba(0,0,0,.4)}
-.routeForBanner{position:fixed;z-index:1900;left:12px;right:12px;top:76px;display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:640px;margin:0 auto;padding:10px 12px;border-radius:14px;background:#0c1424;color:#fff;box-shadow:0 10px 28px rgba(8,22,29,.35)}
-.routeForBanner p{margin:0;font-size:16px;font-weight:800;line-height:1.3}
+.routeForBanner{position:absolute;z-index:800;left:16px;right:16px;top:86px;display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:none;margin:0;padding:10px 12px;border-radius:14px;background:#0c1424;color:#fff;box-shadow:0 10px 28px rgba(8,22,29,.35)}
+.routeForBanner p{margin:0;color:#fff;font-size:16px;font-weight:800;line-height:1.3}
 .routeForBannerActions{display:flex;gap:8px;flex:none}
 .routeForBannerActions button{min-height:44px;min-width:88px;border:0;border-radius:12px;font-size:16px;font-weight:900;cursor:pointer}
 #routeForDone{background:#1e6bff;color:#fff}
@@ -291,7 +291,7 @@ kbd{font-size:9px;line-height:1;border:1px solid rgba(255,255,255,.24);border-bo
 .leaflet-radar-pane{pointer-events:none}
 @media(max-width:960px){
   .weatherStack{top:118px;left:8px;right:8px;width:auto}
-  .routeForBanner{top:118px}
+  .routeForBanner{top:78px}
 }
 
 /* Collapsible route tray */

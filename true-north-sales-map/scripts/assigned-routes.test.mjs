@@ -72,5 +72,7 @@ assert.match(app, /function viewAssignedRoute/);
 assert.match(app, /from\('assigned_routes'\)/);
 assert.match(access, /management&&pending\?'':role/);
 assert.match(access, /dataset\.localRoutes/);
+const mapFirst = readFileSync(new URL('../brand/map-first.css', import.meta.url), 'utf8');
+assert.match(mapFirst, /body\.tn-map-workspace \.routeForBanner p\{color:#fff/);
 
 console.log('Assigned routes: admins build them, employees see only their own, local storage still works');

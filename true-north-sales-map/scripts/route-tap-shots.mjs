@@ -63,7 +63,19 @@ try {
   await openMap(phone);
   await phone.screenshot({ path: path.join(out, 'phone_dot_before_tap.png') });
   await tapHouse(phone, 'h1');
-  await phone.waitForFunction(() => document.getElementById('toastText')?.textContent.includes('Added to route · 10 North Main Street'));
+  await phone.waitForFunction(() => {
+    const el = document.getElementById('toast');
+    const text = document.getElementById('toastText')?.textContent || '';
+    if (!el?.classList.contains('show') || !text.includes('Added to route · 10 North Main Street')) return false;
+    if (getComputedStyle(el).opacity !== '1') return false;
+    const undo = document.getElementById('toastUndo');
+    if (!undo || undo.offsetParent === null) return false;
+    const rect = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + 24);
+    const bar = document.getElementById('mobileRoute')?.getBoundingClientRect();
+    const clearOfBar = !bar || rect.bottom <= bar.top + 1;
+    return clearOfBar && (hit === el || el.contains(hit));
+  });
   await phone.screenshot({ path: path.join(out, 'phone_dot_after_tap_toast.png') });
   await tapHouse(phone, 'h1');
   await phone.waitForFunction(() => document.getElementById('doorSheet')?.classList.contains('open') && document.getElementById('doorSheetRoute')?.textContent === 'Remove from route');
@@ -89,7 +101,14 @@ try {
   await admin.waitForSelector('#routeForPicker:not(.hidden) button');
   await admin.screenshot({ path: path.join(out, 'admin_employee_picker.png') });
   await admin.getByRole('button', { name: /Riley Setter/ }).click();
-  await admin.waitForFunction(() => document.getElementById('routeForBannerText')?.textContent === 'Building route for Riley Setter');
+  await admin.waitForFunction(() => {
+    const text = document.getElementById('routeForBannerText');
+    if (text?.textContent !== 'Building route for Riley Setter') return false;
+    if (getComputedStyle(text).color !== 'rgb(255, 255, 255)') return false;
+    const banner = document.getElementById('routeForBanner').getBoundingClientRect();
+    const search = document.querySelector('.mapSearch').getBoundingClientRect();
+    return banner.top >= search.bottom - 1;
+  });
   await tapHouse(admin, 'h2');
   await admin.waitForFunction(() => window.__tnRoute.selected().includes('h2'));
   await admin.screenshot({ path: path.join(out, 'admin_building_banner.png') });
