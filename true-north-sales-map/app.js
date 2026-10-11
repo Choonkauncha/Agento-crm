@@ -1,6 +1,8 @@
 import { geocodeLabel, geocodeUpdates } from './lib/geocode-results.js';
 import { PASSWORD_UPDATED } from './lib/password-reset.js';
 import { ROUTE_STOP_LIMIT, pickRouteStops, routeToggleLabel, visibleRoutePool } from './lib/route-picks.js';
+import { ROUTE_PIN_COLOR, housePinAction, pinClickSlack, routeAddedMessage } from './lib/house-pin-tap.js';
+import { LOCAL_ROLE_KEY, LOCAL_USER_KEY, canAssignRoutes, clearRouteDraft, mergeAssignedRoutes, readRouteDraft, readStoredRoutes, removeAssignedRoute, routeBannerText, routeTeam, upsertAssignedRoute, visibleAssignedRoutes, writeRouteDraft, writeStoredRoutes } from './lib/assigned-routes.js';
 import { ROUTE_TRAY_KEY, routeTrayCollapsedByDefault, routeTraySummary, shouldExpandRouteTray } from './lib/route-tray.js';
 import { MAP_FACTS } from './lib/map-facts.js';
 import { ARRIVAL_METERS, NAV_CHOICE_KEY, appleDirectionsUrl, arrivedAtStop, etaSeconds, googleDirectionsUrl, googleTravelMode, isAppleDevice, metersBetween, osrmProfile, readNavChoice } from './lib/route-nav.js';
@@ -13,7 +15,7 @@ import { STREET_ZOOM, clusterLeads, pinDiff, sampleHeat } from './lib/pin-layer.
 import { HAIL_MILES, WARNING_COLORS, housesInStorm, readStormCache, reportMarkerText, writeStormCache } from './lib/storm-maps.js';
 import { readSavedLayers, resolveLayers, writeSavedLayers } from './lib/map-layers.js';
 import { bindAreaDraw } from './area-draw.js';
-import { roleLabel } from './lib/field-rules.js';
+import { isUuid, roleLabel } from './lib/field-rules.js';
 import { MANAGEMENT_LINKS, canOpenManagement, managementProfile } from './lib/account-rules.js';
 import { forgetRole, rememberRole } from './lib/management-gate.js';
 import { assertHandoffPhoto, handoffPermissions, isHandoffSetter, validateHandoffPatch, visibleHandoffs } from './lib/handoff-access.js';
@@ -42,7 +44,8 @@ const state={
   filters:{q:'',status:'',rep:'',territory:'',source:'',mine:false},
   layerFlags:{pins:true,density:false,opportunity:false,roofAge:false,radar:false,warnings:false,reports:false,territories:false},
   routeMode:'driving', busy:false, config:null, realtimeChannel:null, refreshTimer:null,
-  doorLeadId:null, doorSaving:false, doorUndo:null,
+  doorLeadId:null, doorSaving:false, doorUndo:null, routeUndo:null,
+  routeFor:null, routeViewOnly:false, routeSnapshot:null, assignedRoutes:[], routeRestored:false, routeCloudWarned:false, routeBadgeLayer:null, routeBadgeSig:'',
   homeArea:true, didFit:false, listSnap:'sheet-collapsed', pinBannerDismissed:false,
   listShown:180, listFilterKey:'', listRows:null, listPaintToken:'', listScrollFrame:0, renderQueued:false,
   leadsById:new Map(), pinMarkers:new Map(), pinShown:new Set(), pinRenderer:null, pinClusters:null, clusterSig:'', clusterSource:null, clusterZoom:null,
@@ -135,6 +138,11 @@ function bindStaticEvents(){
   $('routeBtn').onclick=openRouteFromChrome; $('routeTrayBtn').onclick=optimizeAndDrawRoute;
   $('routeTrayToggle').onclick=()=>setRouteTrayCollapsed($('routeTrayToggle').getAttribute('aria-expanded')==='true');
   $('selectVisibleBtn').onclick=selectVisibleForRoute; $('clearRouteBtn').onclick=clearRoute;
+  document.addEventListener('tn-feature-access', ()=>syncRouteForControls());
+  $('routeForBtn')?.addEventListener('click', openRouteForPicker);
+  $('routeForPickerClose')?.addEventListener('click', closeRouteForPicker);
+  $('routeForDone')?.addEventListener('click', ()=>{ if(state.routeViewOnly) editAssignedRoute(); else finishRouteFor(); });
+  $('routeForCancel')?.addEventListener('click', ()=>{ if(state.routeViewOnly) closeRouteView(); else cancelRouteFor(); });
   $('doorSheetRoute').onclick=()=>{if(!state.doorLeadId)return;toggleSelected(state.doorLeadId);$('doorSheetRoute').textContent=routeToggleLabel(state.selected.has(state.doorLeadId));};
   $('focusBtn').onclick=toggleMapFocus; $('fitBtn').onclick=fitFilteredLeads;
   $('closeDrawer').onclick=closeDrawer;
@@ -267,7 +275,7 @@ function bindStaticEvents(){
   $('doorSheetClose').onclick=closeDoorSheet;
   $('doorSheetScrim').onclick=closeDoorSheet;
   $('doorSheetAnswer').onchange=()=>{const id=state.doorLeadId,value=$('doorSheetAnswer').value;if(id&&value)applyDoorStatus(id,value);};
-  $('toastUndo').onclick=undoDoorStatus;
+  $('toastUndo').onclick=()=>{ if(state.routeUndo) undoRouteAdd(); else undoDoorStatus(); };
   $('toastNext').onclick=()=>openNextHouse(state.doorUndo?.id);
   $('homeAreaBtn').onclick=()=>setHomeArea(true);
   $('allOhioBtn').onclick=()=>setHomeArea(false);
@@ -300,6 +308,10 @@ function enterLocal(message){
   }
   state.realtimeChannel=null;
   state.mode='local'; state.session=null; state.user=null; state.currentRep=null; state.cloudReady=false; state.cacheScope='';
+  document.documentElement.dataset.localRoutes='1';
+  const previousAllowed=window.tnFeatureAllowed;
+  window.tnFeatureAllowed=(key)=>key==='routes'||key==='map'?true:(typeof previousAllowed==='function'?previousAllowed(key):true);
+  document.querySelectorAll('#routeTray,#routeBtn,#mobileRoute,#doorSheetRoute,#routeForBtn,#navBar').forEach(el=>el.removeAttribute('data-feature-disabled'));
   hideLogin(); state.sessionReady=true; if(!state.map) initMapOnce();
   $('userMenu').classList.add('hidden'); $('adminBtn').classList.add('hidden'); $('adminBtn').hidden = true;
   $('connection').textContent='LOCAL DEVICE'; $('connection').className='chip local';
@@ -465,6 +477,7 @@ async function runEnterCloud(session){
   if(gate.error || typeof gate.data?.must_change!=='boolean' || typeof gate.data?.impersonating!=='boolean') throw new Error('Account security verification is unavailable.');
   if(gate.data.must_change && !gate.data.impersonating){document.dispatchEvent(new CustomEvent('tn-password-required'));throw new Error('Choose your own password before opening the field map.');}
   state.cacheScope=leadCacheScope(state.config?.url,user.id);
+  if(typeof document!=='undefined'&&document.documentElement) document.documentElement.dataset.localRoutes='';
   state.mode='cloud'; state.session={...session,user}; state.user=user; state.currentRep=profile.data; hideLogin();
   if(epoch!==authEpoch) return;
   state.sessionReady=true;
@@ -667,6 +680,7 @@ function replaceLeads(rows){
   renderNow(fit);
   markFirstPins();
   warmFieldLayers();
+  restoreAssignedRoutes();
 }
 function resetLeadStream(){
   state.leads=[];
@@ -726,6 +740,7 @@ function ingestLeadChunk(rows, meta, total, isLast){
       renderNow(true);
     }
     warmFieldLayers();
+    restoreAssignedRoutes();
   }
 }
 function setBootProgress(done, total){
@@ -771,6 +786,7 @@ function scrubPrivateMap(){
   state.reps=[];
   state.territories=[];
   state.selected.clear();
+  state.routeFor=null; state.routeViewOnly=false; state.routeSnapshot=null; state.routeUndo=null; state.assignedRoutes=[]; state.routeRestored=false; state.routeBadgeSig='';
   state.routeStops=[];
   state.bootDone=false;
   state.pinsPainted=false;
@@ -786,6 +802,7 @@ function scrubPrivateMap(){
   try{ state.pinMarkers.forEach(marker=>marker.remove()); }catch{ /* map already gone */ }
   state.pinMarkers.clear();
   state.pinShown.clear();
+  state.routeBadgeLayer?.clearLayers?.();
   state.markerLayer?.clearLayers?.();
   state.pinClusters?.clearLayers?.();
   state.heatLayers.forEach(layer=>state.map?.removeLayer(layer));
@@ -857,6 +874,8 @@ function initMapOnce(){
   state.pinRenderer=L.canvas({padding:.5});
   state.markerLayer=L.layerGroup().addTo(state.map);
   state.pinClusters=L.layerGroup().addTo(state.map);
+  state.routeBadgeLayer=L.layerGroup().addTo(state.map);
+  state.routeBadgeSig='';
   state.map.on('dragstart',()=>{ if(state.navigating&&state.navFollow){state.navFollow=false;state.navPanUntil=0;state.map.stop();syncRecenterButton();} });
   state.map.on('zoomstart',()=>{ if(state.navigating&&state.navFollow&&!state.navAutoMove){state.navFollow=false;syncRecenterButton();} });
   state.map.on('moveend',()=>{ if(state.layerFlags.pins) onNavMapMove(); });
@@ -1180,8 +1199,10 @@ function rebuildHeat(){
 const PIN_COLORS={new:'#1e6bff',knocked:'#3E4E59','no-answer':'#A66B19',interested:'#467c9e','not-interested':'#8c5e54','do-not-knock':'#A44835',appointment:'#2E6B4B'};
 function stylePin(marker, lead){
   const selected=state.selected.has(lead.id);
-  const color=selected?'#c54f32':(PIN_COLORS[statusClass(leadStatus(lead))]||'#1e6bff');
-  marker.setStyle({radius:selected?9:7, fillColor:color, color:selected?'#fff':'#0c1424', weight:selected?2:1, fillOpacity:.95});
+  const color=selected?ROUTE_PIN_COLOR:(PIN_COLORS[statusClass(leadStatus(lead))]||'#1e6bff');
+  marker.setStyle({radius:selected?12:8, fillColor:color, color:selected?'#fff':'#0c1424', weight:selected?3:1, fillOpacity:.96});
+  const phone=useDoorSheet()||(window.L?.Browser?.touch&&window.innerWidth<=960);
+  marker._clickTolerance=()=>pinClickSlack(phone);
 }
 function pinPopupHtml(lead){
   const s=leadStatus(lead);
@@ -1198,17 +1219,65 @@ function bindPinPopup(lead){
 function ensurePin(lead){
   let marker=state.pinMarkers.get(lead.id);
   if(marker) return marker;
-  marker=L.circleMarker([Number(lead.lat), Number(lead.lng)],{renderer:state.pinRenderer, radius:7, weight:1, color:'#0c1424', fillColor:'#1e6bff', fillOpacity:.95});
+  marker=L.circleMarker([Number(lead.lat), Number(lead.lng)],{renderer:state.pinRenderer, radius:8, weight:1, color:'#0c1424', fillColor:'#1e6bff', fillOpacity:.96});
   marker._leadId=lead.id;
   stylePin(marker, lead);
-  if(useDoorSheet()) marker.on('click', event=>{L.DomEvent.stop(event);openDoorSheet(lead.id)});
-  else {marker.bindPopup(()=>pinPopupHtml(state.leadsById.get(lead.id)||lead)); marker.on('popupopen',()=>bindPinPopup(state.leadsById.get(lead.id)||lead))}
+  bindHousePin(marker, lead.id);
   state.pinMarkers.set(lead.id, marker);
   return marker;
 }
+function bindHousePin(marker, leadId){
+  marker.bindPopup(()=>pinPopupHtml(state.leadsById.get(leadId)||{id:leadId,address:'Property lead'}));
+  marker.off('click', marker._openPopup);
+  marker.on('click', event=>{L.DomEvent.stop(event);onHousePinTap(leadId);});
+  marker.on('dblclick', event=>{L.DomEvent.stop(event);});
+  marker.on('popupopen', ()=>bindPinPopup(state.leadsById.get(leadId)||{id:leadId}));
+}
+function onHousePinTap(id){
+  const lead=state.leadsById.get(id); if(!lead)return;
+  const action=housePinAction({onRoute:state.selected.has(id), viewOnly:state.routeViewOnly});
+  if(action==='add'){addHouseToRoute(id);return;}
+  openHouseDetail(id);
+}
+function openHouseDetail(id){
+  if(useDoorSheet()) openDoorSheet(id);
+  else state.pinMarkers.get(id)?.openPopup();
+}
+function addHouseToRoute(id){
+  if(window.tnFeatureAllowed?.('routes')===false){toast('Routes are turned off for this account.');return;}
+  if(state.selected.has(id)||state.routeViewOnly)return;
+  if(state.selected.size>=ROUTE_STOP_LIMIT){toast(`Route stop limit is ${ROUTE_STOP_LIMIT}.`);return;}
+  const lead=state.leadsById.get(id);
+  state.selected.add(id);
+  document.querySelectorAll(`.rowCheck[data-id="${CSS.escape(id)}"]`).forEach(box=>{box.checked=true});
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  syncRouteButtons(id);
+  rememberRouteChange();
+  toastRouteAdded(lead);
+}
 function clusterIcon(count){
-  const size=count>999?46:count>99?40:34;
+  const size=count>999?52:count>99?48:44;
   return L.divIcon({className:'pinCluster', html:`<span>${fmt(count)}</span>`, iconSize:[size,size], iconAnchor:[size/2,size/2]});
+}
+function routeBadgeIcon(n){
+  return L.divIcon({className:'routePinBadge', html:`<span>${n}</span>`, iconSize:[22,22], iconAnchor:[11,28]});
+}
+function syncRouteBadges(){
+  if(!state.routeBadgeLayer||!state.map)return;
+  const street=state.layerFlags.pins&&state.map.getZoom()>=STREET_ZOOM;
+  const sig=street?[...state.selected].join(','):'';
+  if(sig===state.routeBadgeSig)return;
+  state.routeBadgeSig=sig;
+  state.routeBadgeLayer.clearLayers();
+  if(!street)return;
+  let n=0;
+  for(const id of state.selected){
+    const lead=state.leadsById.get(id);
+    if(!lead||!isCoords(lead))continue;
+    n+=1;
+    state.routeBadgeLayer.addLayer(L.marker([Number(lead.lat), Number(lead.lng)],{icon:routeBadgeIcon(n),interactive:false,keyboard:false,zIndexOffset:500}));
+  }
 }
 function hideStreetPins(){
   state.pinShown.forEach(id=>state.pinMarkers.get(id)?.remove());
@@ -1232,11 +1301,11 @@ function onNavMapMove(){
 }
 function syncPins(options={}){
   if(!state.map)return;
-  if(!state.layerFlags.pins){hideStreetPins();state.pinClusters?.clearLayers();state.clusterSig='';state.clusterSource=null;return}
+  if(!state.layerFlags.pins){hideStreetPins();state.pinClusters?.clearLayers();state.clusterSig='';state.clusterSource=null;syncRouteBadges();return}
   const zoom=state.map.getZoom();
   if(zoom<STREET_ZOOM){
     hideStreetPins();
-    if(state.clusterSource===state.filtered && state.clusterZoom===zoom && state.clusterSig) return;
+    if(state.clusterSource===state.filtered && state.clusterZoom===zoom && state.clusterSig){syncRouteBadges();return;}
     const clusters=clusterLeads(state.filtered, zoom);
     state.clusterSig=`${zoom}:${clusters.length}:${state.filtered.length}`;
     state.clusterSource=state.filtered;
@@ -1247,6 +1316,7 @@ function syncPins(options={}){
       marker.on('click',()=>state.map.setView([cluster.lat, cluster.lng], Math.min(STREET_ZOOM, zoom+2)));
       state.pinClusters.addLayer(marker);
     });
+    syncRouteBadges();
     return;
   }
   if(state.clusterSig){state.pinClusters.clearLayers();state.clusterSig='';state.clusterSource=null;state.clusterZoom=null}
@@ -1262,6 +1332,7 @@ function syncPins(options={}){
     state.pinShown.add(id);
   });
   if(options.restyle!==false) want.forEach(id=>{const lead=state.leadsById.get(id), marker=state.pinMarkers.get(id); if(lead&&marker) stylePin(marker, lead)});
+  syncRouteBadges();
 }
 function useDoorSheet(){return doorSheetMedia.matches;}
 function drawHeat(kind){
@@ -1638,6 +1709,8 @@ function toastDoorResult(lead, fromStatus, toStatus){
   const el=$('toast'); if(!el)return;
   $('toastText').textContent=`${toStatus} · ${lead.address}`;
   $('toastActions').classList.remove('hidden');
+  $('toastNext')?.classList.remove('hidden');
+  state.routeUndo=null;
   state.doorUndo={id:lead.id, from:fromStatus, to:toStatus};
   el.classList.add('show');
   clearTimeout(toast._t);
@@ -1648,8 +1721,39 @@ function dismissDoorToast(){
   clearTimeout(toast._t);
   $('toast')?.classList.remove('show');
   $('toastActions')?.classList.add('hidden');
+  $('toastNext')?.classList.remove('hidden');
   state.doorUndo=null;
+  state.routeUndo=null;
   syncListOverlay();
+}
+function toastRouteAdded(lead){
+  const el=$('toast'); if(!el)return;
+  $('toastText').textContent=routeAddedMessage(lead?.address);
+  $('toastActions').classList.remove('hidden');
+  $('toastNext')?.classList.add('hidden');
+  state.doorUndo=null;
+  state.routeUndo={id:lead?.id};
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t=setTimeout(()=>{el.classList.remove('show');$('toastActions')?.classList.add('hidden');$('toastNext')?.classList.remove('hidden');state.routeUndo=null;syncListOverlay();},5000);
+  syncListOverlay();
+}
+function undoRouteAdd(){
+  const pending=state.routeUndo; if(!pending)return;
+  state.routeUndo=null;
+  $('toastActions')?.classList.add('hidden');
+  $('toastNext')?.classList.remove('hidden');
+  if(!state.selected.has(pending.id)){toast('That house is already off the route.');return;}
+  state.selected.delete(pending.id);
+  document.querySelectorAll(`.rowCheck[data-id="${CSS.escape(pending.id)}"]`).forEach(box=>{box.checked=false});
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  syncRouteButtons(pending.id);
+  if(state.doorLeadId===pending.id) closeDoorSheet();
+  state.map?.closePopup();
+  rememberRouteChange();
+  const lead=state.leadsById.get(pending.id);
+  toast(`Removed from route · ${lead?.address||'house'}`);
 }
 
 async function persistLeadPatch(l,patch){
@@ -2250,7 +2354,7 @@ function locate(){
 }
 locate._seq=0;
 
-function updateSelectedBadge(){
+function updateSelectedBadge(options={}){
   if(state.routeBuildKey && state.routeBuildKey!==routeBuildKey())invalidateBuiltRoute();
   publishRouteState();
   const prev=state.routeCountSeen;
@@ -2262,7 +2366,7 @@ function updateSelectedBadge(){
   $('startRouteBtn').disabled=n===0||!!state.routeBuilding;
   $('clearRouteBtn').disabled=n===0;
   updateRouteTraySummary();
-  if(shouldExpandRouteTray(prev,n))setRouteTrayCollapsed(false);
+  if(options.expand!==false && shouldExpandRouteTray(prev,n))setRouteTrayCollapsed(false);
   else liftMapChrome();
 }
 function readRouteTrayCollapsed(){
@@ -2303,6 +2407,7 @@ function applyAreaRoute(result){
   updateSelectedBadge();
   refreshSelectedMarkers();
   renderWorkList();
+  rememberRouteChange();
   setRouteTrayCollapsed(false);
   if(!stops.length){state.routeGeometry=null;drawRoutePreview(false);return;}
   openRoutePanel();
@@ -2317,9 +2422,13 @@ function openRouteFromChrome(){
 }
 function toggleSelected(id){
   if(window.tnFeatureAllowed?.('routes')===false)return;
-  if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);
+  if(state.routeViewOnly){state.routeViewOnly=false; showRouteBanner();}
+  if(state.selected.has(id))state.selected.delete(id);
+  else if(state.selected.size>=ROUTE_STOP_LIMIT){toast(`Route stop limit is ${ROUTE_STOP_LIMIT}.`);return;}
+  else state.selected.add(id);
   document.querySelectorAll(`.rowCheck[data-id="${CSS.escape(id)}"]`).forEach(box=>{box.checked=state.selected.has(id)});
-  updateSelectedBadge();refreshSelectedMarkers();syncRouteButtons(id);
+  updateSelectedBadge({expand:false});refreshSelectedMarkers();syncRouteButtons(id);
+  rememberRouteChange();
 }
 function syncRouteButtons(id){
   const label=routeToggleLabel(state.selected.has(id));
@@ -2327,11 +2436,13 @@ function syncRouteButtons(id){
   if(state.doorLeadId===id&&$('doorSheetRoute'))$('doorSheetRoute').textContent=label;
 }
 function refreshSelectedMarkers(){
+  state.routeBadgeSig='';
   state.pinShown.forEach(id=>{
     const lead=state.leadsById.get(id);
     const marker=state.pinMarkers.get(id);
     if(lead&&marker) stylePin(marker, lead);
   });
+  syncRouteBadges();
 }
 function selectVisibleForRoute(){
   if(window.tnFeatureAllowed?.('routes')===false)return;
@@ -2346,12 +2457,14 @@ function selectVisibleForRoute(){
   $('routeWarning').textContent=leftOut?note:'';
   toast(note);
   updateSelectedBadge();refreshSelectedMarkers();renderWorkList();
+  rememberRouteChange();
 }
 function clearRoute(){
   state.routeRequestSeq=(state.routeRequestSeq||0)+1;
   endNavigation('');
   areaDraw?.clearArea();
   state.selected.clear();state.stormHouseIds=null;state.routeStops=[];state.routeGeometry=null;
+  rememberRouteChange();
   $('routeWarning').textContent='';$('routeDistance').textContent='';$('routeTrayStats').textContent='';
   renderRouteStops();
   $('routeTrayNote').textContent='Select homes, then build an optimized route.';
@@ -2926,10 +3039,228 @@ function exportLeads(){
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='true-north-sales-map-export.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
+function actingRole(){
+  if(state.currentRep?.role) return state.currentRep.role;
+  if(state.mode==='cloud') return '';
+  try{return localStorage.getItem(LOCAL_ROLE_KEY)||'';}catch{return '';}
+}
+function routeSelfId(){
+  if(state.mode==='cloud') return state.currentRep?.id||'';
+  try{return localStorage.getItem(LOCAL_USER_KEY)||'local';}catch{return 'local';}
+}
+function rememberRouteChange(){
+  if(state.routeViewOnly) return;
+  if(state.routeFor){
+    writeRouteDraft(sessionStorage, {assigneeId:state.routeFor.id, name:state.routeFor.name, leadIds:[...state.selected], snapshot:state.routeSnapshot||[]});
+    return;
+  }
+  persistOwnRoute();
+}
+function persistOwnRoute(){
+  const owner=routeSelfId(); if(!owner) return;
+  state.assignedRoutes=upsertAssignedRoute(state.assignedRoutes, {
+    assigneeId:owner,
+    createdBy:state.currentRep?.id||owner,
+    leadIds:[...state.selected],
+    assigneeName:state.currentRep?.name||''
+  });
+  try{writeStoredRoutes(localStorage, state.assignedRoutes);}catch{}
+  scheduleCloudRoute(owner);
+  renderAssignedRouteList();
+}
+let routeCloudTimer=0;
+function scheduleCloudRoute(assigneeId){
+  clearTimeout(routeCloudTimer);
+  routeCloudTimer=setTimeout(()=>{
+    const route=state.assignedRoutes.find(row=>row.assignee_id===assigneeId);
+    if(route) pushAssignedRoute(route);
+  }, 400);
+}
+async function pushAssignedRoute(route){
+  if(state.mode!=='cloud'||!state.supabase||!isUuid(route?.assignee_id)) return {ok:true, local:true};
+  const row={assignee_id:route.assignee_id, created_by:isUuid(route.created_by)?route.created_by:null, lead_ids:route.lead_ids, updated_at:route.updated_at||new Date().toISOString()};
+  const {error}=await state.supabase.from('assigned_routes').upsert(row, {onConflict:'assignee_id'});
+  if(error){
+    console.warn(error);
+    if(!state.routeCloudWarned){state.routeCloudWarned=true; toast('Saved on this device. Run the assigned-routes SQL in Supabase before this route can sync.');}
+    return {ok:false, error};
+  }
+  return {ok:true};
+}
+async function loadAssignedRouteRows(){
+  const local=readStoredRoutes(localStorage);
+  if(state.mode!=='cloud'||!state.supabase) return local;
+  const {data, error}=await state.supabase.from('assigned_routes').select('id,assignee_id,created_by,lead_ids,updated_at,assignee:reps!assigned_routes_assignee_id_fkey(name)');
+  if(error){console.warn(error); return local;}
+  const remote=(data||[]).map(row=>({assignee_id:row.assignee_id, created_by:row.created_by, lead_ids:row.lead_ids||[], assignee_name:row.assignee?.name||'', updated_at:row.updated_at}));
+  const merged=mergeAssignedRoutes(local, remote);
+  try{writeStoredRoutes(localStorage, merged);}catch{}
+  return merged;
+}
+async function restoreAssignedRoutes(){
+  if(state.routeRestored||!state.leadLoadSettled) return;
+  state.routeRestored=true;
+  try{state.assignedRoutes=await loadAssignedRouteRows();}
+  catch(error){console.warn(error); state.assignedRoutes=readStoredRoutes(localStorage);}
+  const role=actingRole();
+  const draft=canAssignRoutes(role)?readRouteDraft(sessionStorage):null;
+  if(draft){
+    state.routeSnapshot=draft.snapshot||[];
+    state.routeFor={id:draft.assigneeId, name:draft.name};
+    state.routeViewOnly=false;
+    state.selected=new Set(draft.leadIds.filter(id=>state.leadsById.has(id)));
+    showRouteBanner();
+  }else if(state.selected.size===0){
+    const self=routeSelfId();
+    const mine=visibleAssignedRoutes(state.assignedRoutes, {repId:self, role}).find(row=>row.assignee_id===self);
+    if(mine){
+      mine.lead_ids.forEach(id=>{if(state.leadsById.has(id)) state.selected.add(id);});
+      if(mine.created_by && mine.created_by!==self && $('routeTrayNote')) $('routeTrayNote').textContent=`Assigned route · ${state.selected.size} houses`;
+    }
+  }
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  renderAssignedRouteList();
+  syncRouteForControls();
+  if(new URLSearchParams(location.search).get('makeRoute')==='1' && canAssignRoutes(role)) openRouteForPicker();
+}
+function syncRouteForControls(){
+  const show=canAssignRoutes(actingRole());
+  $('routeForBtn')?.classList.toggle('hidden', !show);
+  if(!show) $('assignedRouteList')?.setAttribute('hidden','');
+  else renderAssignedRouteList();
+}
+function showRouteBanner(){
+  const banner=$('routeForBanner'); if(!banner||!state.routeFor) return;
+  const editing=!state.routeViewOnly;
+  $('routeForBannerText').textContent=routeBannerText(state.routeFor.name, {editing});
+  if($('routeForDone')) $('routeForDone').textContent=editing?'Done':'Edit';
+  if($('routeForCancel')) $('routeForCancel').textContent=editing?'Cancel':'Close';
+  banner.classList.remove('hidden');
+}
+function hideRouteBanner(){
+  $('routeForBanner')?.classList.add('hidden');
+}
+function openRouteForPicker(){
+  if(!canAssignRoutes(actingRole())) return;
+  const list=$('routeForList'); if(!list) return;
+  const people=routeTeam(state.reps);
+  list.innerHTML=people.length?people.map(rep=>`<button type="button" data-route-for="${esc(rep.id)}"><b>${esc(rep.name||'Employee')}</b><span>${esc(roleLabel(rep.role))}</span></button>`).join(''):'<p class="muted">No reps or setters are on this team yet.</p>';
+  list.querySelectorAll('[data-route-for]').forEach(btn=>{btn.onclick=()=>{const rep=state.reps.find(row=>row.id===btn.dataset.routeFor); if(rep) beginRouteFor(rep);};});
+  $('routeForPicker')?.classList.remove('hidden');
+}
+function closeRouteForPicker(){$('routeForPicker')?.classList.add('hidden');}
+function beginRouteFor(rep){
+  if(!canAssignRoutes(actingRole())||!rep) return;
+  closeRouteForPicker();
+  if(!state.routeFor) state.routeSnapshot=[...state.selected];
+  const existing=state.assignedRoutes.find(row=>row.assignee_id===rep.id);
+  state.routeFor={id:rep.id, name:rep.name||'Employee'};
+  state.routeViewOnly=false;
+  state.selected=new Set((existing?.lead_ids||[]).filter(id=>state.leadsById.has(id)));
+  showRouteBanner();
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  rememberRouteChange();
+  if(useDoorSheet()) setListSheet('sheet-collapsed');
+}
+function editAssignedRoute(){
+  if(!state.routeFor) return;
+  state.routeViewOnly=false;
+  showRouteBanner();
+}
+function closeRouteView(){
+  state.routeFor=null;
+  state.routeViewOnly=false;
+  state.selected=new Set(state.routeSnapshot||[]);
+  state.routeSnapshot=null;
+  hideRouteBanner();
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+}
+function cancelRouteFor(){
+  try{clearRouteDraft(sessionStorage);}catch{}
+  closeRouteView();
+}
+async function finishRouteFor(){
+  const person=state.routeFor; if(!person) return;
+  const createdBy=state.currentRep?.id||routeSelfId()||person.id;
+  state.assignedRoutes=upsertAssignedRoute(state.assignedRoutes, {assigneeId:person.id, createdBy, leadIds:[...state.selected], assigneeName:person.name});
+  try{writeStoredRoutes(localStorage, state.assignedRoutes); clearRouteDraft(sessionStorage);}catch{}
+  const saved=state.assignedRoutes.find(row=>row.assignee_id===person.id);
+  const pushed=await pushAssignedRoute(saved);
+  const count=saved?.lead_ids.length||0;
+  state.routeFor=null;
+  state.routeViewOnly=false;
+  state.selected=new Set(state.routeSnapshot||[]);
+  state.routeSnapshot=null;
+  hideRouteBanner();
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  renderAssignedRouteList();
+  if(pushed?.ok===false) announce(`Saved on this device for ${person.name}. Run the assigned-routes SQL in Supabase so ${person.name} can see it.`);
+  else announce(`Route saved for ${person.name} · ${count} ${count===1?'house':'houses'}`);
+}
+function viewAssignedRoute(assigneeId){
+  const route=state.assignedRoutes.find(row=>row.assignee_id===assigneeId); if(!route) return;
+  if(!state.routeFor) state.routeSnapshot=[...state.selected];
+  const rep=state.reps.find(row=>row.id===assigneeId);
+  state.routeFor={id:assigneeId, name:route.assignee_name||rep?.name||'Employee'};
+  state.routeViewOnly=true;
+  state.selected=new Set(route.lead_ids.filter(id=>state.leadsById.has(id)));
+  showRouteBanner();
+  updateSelectedBadge({expand:false});
+  refreshSelectedMarkers();
+  if(useDoorSheet()) setListSheet('sheet-collapsed');
+}
+async function deleteAssignedRoute(assigneeId){
+  const route=state.assignedRoutes.find(row=>row.assignee_id===assigneeId);
+  const name=route?.assignee_name||state.reps.find(row=>row.id===assigneeId)?.name||'that employee';
+  if(!window.confirm(`Delete the route for ${name}?`)) return;
+  state.assignedRoutes=removeAssignedRoute(state.assignedRoutes, assigneeId);
+  try{writeStoredRoutes(localStorage, state.assignedRoutes);}catch{}
+  let cloudNote='';
+  if(state.mode==='cloud'&&state.supabase&&isUuid(assigneeId)){
+    const {error}=await state.supabase.from('assigned_routes').delete().eq('assignee_id', assigneeId);
+    if(error){console.warn(error); cloudNote=`Deleted on this device. Supabase did not remove ${name}'s route yet.`;}
+  }
+  if(state.routeFor?.id===assigneeId) cancelRouteFor();
+  renderAssignedRouteList();
+  announce(cloudNote||`Deleted the route for ${name}`);
+}
+function renderAssignedRouteList(){
+  const el=$('assignedRouteList'); if(!el) return;
+  const role=actingRole();
+  if(!canAssignRoutes(role)){el.hidden=true; el.innerHTML=''; return;}
+  const rows=visibleAssignedRoutes(state.assignedRoutes, {repId:routeSelfId(), role}).filter(row=>row.assignee_id!==routeSelfId());
+  el.hidden=false;
+  if(!rows.length){el.innerHTML='<p class="muted">No employee routes yet.</p>'; return;}
+  el.innerHTML=rows.map(row=>`<div class="assignedRouteRow"><span><b>${esc(row.assignee_name||'Employee')}</b><small>${row.lead_ids.length} ${row.lead_ids.length===1?'house':'houses'}</small></span><button type="button" data-route-view="${esc(row.assignee_id)}">View</button><button type="button" data-route-edit="${esc(row.assignee_id)}">Edit</button><button type="button" data-route-delete="${esc(row.assignee_id)}">Delete</button></div>`).join('');
+  el.querySelectorAll('[data-route-view]').forEach(btn=>{btn.onclick=()=>viewAssignedRoute(btn.dataset.routeView);});
+  el.querySelectorAll('[data-route-edit]').forEach(btn=>{btn.onclick=()=>{const rep=state.reps.find(row=>row.id===btn.dataset.routeEdit)||{id:btn.dataset.routeEdit, name:state.assignedRoutes.find(row=>row.assignee_id===btn.dataset.routeEdit)?.assignee_name||'Employee'}; beginRouteFor(rep);};});
+  el.querySelectorAll('[data-route-delete]').forEach(btn=>{btn.onclick=()=>deleteAssignedRoute(btn.dataset.routeDelete);});
+}
+window.__tnRoute={
+  pinPoint(id){
+    const lead=state.leadsById.get(id); if(!lead||!state.map) return null;
+    const point=state.map.latLngToContainerPoint([Number(lead.lat), Number(lead.lng)]);
+    const rect=state.map.getContainer().getBoundingClientRect();
+    return {x:rect.left+point.x, y:rect.top+point.y, address:lead.address||'', onRoute:state.selected.has(id)};
+  },
+  focus(lat, lng, zoom){state.map?.setView([lat, lng], zoom); syncPins();},
+  selected(){return [...state.selected];}
+};
+function announce(message, ms=3200){
+  state.doorUndo=null;
+  state.routeUndo=null;
+  $('toastNext')?.classList.remove('hidden');
+  toast(message, ms);
+}
 function toast(message, ms=2600){
   const el=$('toast'); if(!el)return;
   // A live echo of the save we just made must not cover the Undo button.
   if(state.doorUndo) return;
+  if(state.routeUndo) return;
   $('toastText').textContent=message;
   $('toastActions').classList.add('hidden');
   state.doorUndo=null;

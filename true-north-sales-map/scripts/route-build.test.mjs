@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const code=source.slice(source.indexOf('function routeBuildKey(){'),source.indexOf('async function fetchRoadRoute('));
-const badge=source.slice(source.indexOf('function updateSelectedBadge(){'),source.indexOf('function readRouteTrayCollapsed('));
+const badge=source.slice(source.indexOf('function updateSelectedBadge('),source.indexOf('function readRouteTrayCollapsed('));
 const elements=new Map();const $=id=>{if(!elements.has(id))elements.set(id,{value:id==='routeCount'?'25':'',textContent:'',disabled:false});return elements.get(id)};
 let requests=0,release;
 const state={routeMode:'driving',selected:new Set(['a']),leads:[{id:'a',lat:40,lng:-82},{id:'b',lat:41,lng:-82}],routeStops:[],map:null};
