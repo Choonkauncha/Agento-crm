@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { LIVE_SOCKET, base64ToPcm16, createLiveCoach, downsampleTo16k, floatToPcm16, pcm16ToBase64 } from '../tn-files/live-coach.js';
+import { LIVE_SOCKET, base64ToPcm16, createLiveCoach, downsampleTo16k, floatToPcm16, parseLiveMessage, pcm16ToBase64 } from '../tn-files/live-coach.js';
 
 assert.match(LIVE_SOCKET, /BidiGenerateContentConstrained$/, 'ephemeral tokens must use the constrained Live endpoint');
 
@@ -28,6 +28,7 @@ class TestAudioContext {
   createGain() { return { gain: { value: 0 }, connect() {} }; }
   createBuffer() { return { duration: 0, getChannelData: () => new Float32Array() }; }
   createBufferSource() { return { connect() {}, disconnect() {}, start() { audioStarts += 1; }, stop() {} }; }
+  resume() { return Promise.resolve(); }
   close() { return Promise.resolve(); }
 }
 let stopCount = 0;
@@ -86,6 +87,35 @@ const stalled=createLiveCoach({sb:{auth:{getSession:async()=>({data:{session:{ac
 await stalled.start();await new Promise(resolve=>setTimeout(resolve,20));
 assert.equal(stalled.isActive(),false,'missing setupComplete ends after deadline');
 assert.match(timeoutErrors[0],/timed out/);
+assert.throws(() => JSON.parse(new Blob(['{}'])), /\[object Blob\]/, 'a Blob must not be parsed until its bytes are read');
+const blobPayload = JSON.stringify({ setupComplete: {} });
+assert.deepEqual(await parseLiveMessage(blobPayload), { setupComplete: {} });
+assert.deepEqual(await parseLiveMessage(new Blob([blobPayload])), { setupComplete: {} });
+assert.deepEqual(await parseLiveMessage(new TextEncoder().encode(blobPayload).buffer), { setupComplete: {} });
+const blobErrors = [];
+const blobTranscripts = [];
+const blobStates = [];
+const blobSession = createLiveCoach({ sb: { auth: { getSession: async () => ({ data: { session: { access_token: 'user-token' } } }) } } }, {
+  onError: error => blobErrors.push(error.message),
+  onTranscript: row => blobTranscripts.push({ ...row }),
+  onState: value => blobStates.push(value)
+});
+await blobSession.start();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(activeSocket.binaryType, 'blob');
+activeSocket.onmessage({ data: new Blob([JSON.stringify({ setupComplete: {} })]) });
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.deepEqual(blobErrors, [], 'binary setupComplete must not surface as invalid JSON');
+assert.ok(blobStates.includes('listening'), 'binary setupComplete starts the microphone');
+const heard = JSON.stringify({ serverContent: { inputTranscription: { text: 'Already have a contractor.' }, outputTranscription: { text: 'Ask what matters most.' } } });
+activeSocket.onmessage({ data: new TextEncoder().encode(heard).buffer });
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.deepEqual(blobErrors, []);
+assert.equal(blobTranscripts[0]?.role, 'user');
+assert.equal(blobTranscripts[0]?.text, 'Already have a contractor.');
+assert.equal(blobTranscripts[1]?.role, 'assistant');
+assert.equal(blobTranscripts[1]?.text, 'Ask what matters most.');
+blobSession.stop();
 globalThis.fetch = original.fetch;
 globalThis.WebSocket = original.WebSocket;
 globalThis.AudioContext = original.AudioContext;

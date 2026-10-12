@@ -41,6 +41,20 @@ export function base64ToPcm16(value) {
   return new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
 }
 
+/**
+ * Gemini Live sends JSON in WebSocket text or binary frames. Browsers expose
+ * binary frames as Blob (or ArrayBuffer). JSON.parse on the Blob object
+ * stringifies it to "[object Blob]" and throws.
+ */
+export async function parseLiveMessage(data) {
+  let text = data;
+  if (typeof Blob !== 'undefined' && data instanceof Blob) text = await data.text();
+  else if (data instanceof ArrayBuffer) text = new TextDecoder().decode(data);
+  else if (ArrayBuffer.isView(data)) text = new TextDecoder().decode(data);
+  if (typeof text !== 'string') throw new Error('Live Coach received a message it could not read.');
+  return JSON.parse(text);
+}
+
 function emit(callback, value) { try { callback?.(value); } catch { /* UI callbacks must not break audio cleanup. */ } }
 
 /**
@@ -158,13 +172,14 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
   function send(value) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }
 
   function startMic(attempt) {
-    return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(media => {
+    return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(async media => {
       if (stopped || attempt !== generation) {
         media.getTracks().forEach(track => track.stop());
         throw Object.assign(new Error('Live Coach start was cancelled.'), { name: 'AbortError' });
       }
       stream = media;
       inputContext = new AudioContext({ sampleRate: INPUT_RATE });
+      await inputContext.resume?.().catch(() => {});
       inputSource = inputContext.createMediaStreamSource(stream);
       processor = inputContext.createScriptProcessor(2048, 1, 1);
       processor.onaudioprocess = event => {
@@ -198,7 +213,9 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       openingMessage = data.openingMessage || openingMessage;
       const url = `${LIVE_SOCKET}?access_token=${encodeURIComponent(data.token)}`;
       outputContext = new AudioContext({ sampleRate: OUTPUT_RATE });
+      await outputContext.resume?.().catch(() => {});
       socket = new WebSocket(url);
+      socket.binaryType = 'blob';
       setupTimer = setTimeout(() => {
         if (!stopped && attempt === generation) fail(new Error('Live Coach connection timed out. Try starting voice again.'));
       }, setupTimeoutMs);
@@ -208,7 +225,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       };
       socket.onmessage = event => {
         if (stopped || attempt !== generation) return;
-        Promise.resolve().then(() => handleMessage(JSON.parse(event.data), attempt)).catch(error => {
+        Promise.resolve(parseLiveMessage(event.data)).then(message => handleMessage(message, attempt)).catch(error => {
           if (!stopped && attempt === generation) fail(error);
         });
       };
