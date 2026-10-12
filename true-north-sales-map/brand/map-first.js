@@ -57,6 +57,7 @@ const syncRoutePresentation = () => {
   if (!tray) return;
   const ready = tray.dataset.routeReady === 'true';
   const building = tray.dataset.routeBuilding === 'true';
+  const stale = tray.dataset.routeStale === 'true';
   sheet?.toggleAttribute('data-route-ready', ready);
   const count = document.getElementById('routeTrayCount');
   if (ready && count && tray.dataset.routeStopCount) count.textContent = tray.dataset.routeStopCount;
@@ -73,8 +74,8 @@ const syncRoutePresentation = () => {
     if (button?.firstChild?.nodeType === Node.TEXT_NODE) button.firstChild.textContent = ready ? 'Review route ' : 'Build route ';
   }
   const build = document.getElementById('routeTrayBtn');
-  if (build) build.textContent = building ? 'Building route…' : ready ? 'Rebuild route' : 'Build route';
+  if (build) build.textContent = building ? 'Building route…' : ready && stale ? 'Re-optimize' : ready ? 'Rebuild route' : 'Build route';
   wasReady = ready;
 };
-if (tray) new MutationObserver(syncRoutePresentation).observe(tray, { attributes: true, attributeFilter: ['data-route-ready', 'data-route-building', 'data-route-stop-count'] });
+if (tray) new MutationObserver(syncRoutePresentation).observe(tray, { attributes: true, attributeFilter: ['data-route-ready', 'data-route-building', 'data-route-stop-count', 'data-route-stale'] });
 syncRoutePresentation();
