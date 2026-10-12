@@ -1,6 +1,7 @@
 import { geocodeLabel, geocodeUpdates } from './lib/geocode-results.js';
 import { PASSWORD_UPDATED } from './lib/password-reset.js';
 import { ROUTE_STOP_LIMIT, pickRouteStops, routeToggleLabel, visibleRoutePool } from './lib/route-picks.js';
+import { orderedRouteIds, reviseBuiltRoute, routeStopOrder, selectionOnlyChange } from './lib/route-edit.js';
 import { ROUTE_PIN_COLOR, housePinAction, pinClickSlack, routeAddedMessage } from './lib/house-pin-tap.js';
 import { LOCAL_ROLE_KEY, LOCAL_USER_KEY, canAssignRoutes, clearRouteDraft, mergeAssignedRoutes, readRouteDraft, readStoredRoutes, removeAssignedRoute, routeBannerText, routeTeam, upsertAssignedRoute, visibleAssignedRoutes, writeRouteDraft, writeStoredRoutes } from './lib/assigned-routes.js';
 import { ROUTE_TRAY_KEY, routeTrayCollapsedByDefault, routeTraySummary, shouldExpandRouteTray } from './lib/route-tray.js';
@@ -40,7 +41,7 @@ const state={
   leads:[], filtered:[], reps:[], territories:[], appointments:[], activities:[], centers:{},
   selected:new Set(), active:null, map:null, markerLayer:null, heatLayers:[], stormLayer:null,
   stormPack:null, stormHouseIds:null, stormToken:0, radarLayers:[], radarTimer:null, radarSignature:'', warningLayer:null, warningSignature:'', reportLayer:null, reportSignature:'',
-  routeLine:null, userMarker:null, routeStops:[], currentLocation:null,
+  routeLine:null, userMarker:null, routeStops:[], routeStale:false, currentLocation:null,
   filters:{q:'',status:'',rep:'',territory:'',source:'',mine:false},
   layerFlags:{pins:true,density:false,opportunity:false,roofAge:false,radar:false,warnings:false,reports:false,territories:false},
   routeMode:'driving', busy:false, config:null, realtimeChannel:null, refreshTimer:null,
@@ -1068,7 +1069,7 @@ function paintPagedList(list, rows){
 }
 function bindListRows(list){
   list.querySelectorAll('.leadRow').forEach(el=>el.onclick=e=>{if(e.target.closest('.rowCheck'))return;openLead(el.dataset.id)});
-  list.querySelectorAll('.rowCheck').forEach(cb=>cb.onchange=()=>{cb.checked?state.selected.add(cb.dataset.id):state.selected.delete(cb.dataset.id);updateSelectedBadge();refreshSelectedMarkers();syncRouteButtons(cb.dataset.id)});
+  list.querySelectorAll('.rowCheck').forEach(cb=>cb.onchange=()=>{toggleSelected(cb.dataset.id);});
 }
 function leadHTML(l){
   const s=leadStatus(l), owner=leadOwnerName(l), score=scoreLead(l), old=l.year_built??l.yearBuilt;
@@ -1266,13 +1267,14 @@ function routeBadgeIcon(n){
 function syncRouteBadges(){
   if(!state.routeBadgeLayer||!state.map)return;
   const street=state.layerFlags.pins&&state.map.getZoom()>=STREET_ZOOM;
-  const sig=street?[...state.selected].join(','):'';
+  const order=routeStopOrder(state.routeStops, state.selected);
+  const sig=street?order.join(','):'';
   if(sig===state.routeBadgeSig)return;
   state.routeBadgeSig=sig;
   state.routeBadgeLayer.clearLayers();
   if(!street)return;
   let n=0;
-  for(const id of state.selected){
+  for(const id of order){
     const lead=state.leadsById.get(id);
     if(!lead||!isCoords(lead))continue;
     n+=1;
@@ -1832,8 +1834,9 @@ function openRoutePanel(){
   $('optimizeRouteBtn').hidden=!state.routeStops.length;
   $('openGoogleRouteBtn').disabled=!state.routeStops.length;
   $('routePanel').classList.remove('hidden');
+  state.map?.invalidateSize({animate:false});
 }
-function closeRoutePanel(){const wasOpen=!$('routePanel').classList.contains('hidden');$('routePanel').classList.add('hidden');if(wasOpen)$('routeTrayBtn').focus()}
+function closeRoutePanel(){const wasOpen=!$('routePanel').classList.contains('hidden');$('routePanel').classList.add('hidden');if(wasOpen){$('routeTrayBtn').focus();state.map?.invalidateSize({animate:false});}}
 function routeBuildKey(){return `${state.routeMode}:${$('routeCount').value}:${[...state.selected].sort().join(',')}`;}
 function publishRouteState(){
   const tray=$('routeTray');if(!tray)return;
@@ -1841,16 +1844,32 @@ function publishRouteState(){
   tray.dataset.routeReady=String(!!state.routeStops?.length&&!state.routeBuilding&&state.routeBuildKey===routeBuildKey());
   tray.dataset.routeBuilding=String(!!state.routeBuilding);
   tray.dataset.routeStopCount=String(state.routeStops?.length||0);
+  tray.dataset.routeStale=String(!!state.routeStale&&!!state.routeStops?.length);
 }
 function invalidateBuiltRoute(){
   state.routeRequestSeq=(state.routeRequestSeq||0)+1;
-  state.routeBuildKey='';state.routeStops=[];state.routeGeometry=null;
+  state.routeBuildKey='';state.routeStops=[];state.routeGeometry=null;state.routeStale=false;
   if(state.navigating)endNavigation('');
   if(state.routeLine&&state.map){state.map.removeLayer(state.routeLine);state.routeLine=null;}
   $('routeDistance').textContent='';$('routeTrayStats').textContent='';
   $('optimizeRouteBtn').textContent='Build route';
   renderRouteStops();
   publishRouteState();
+}
+function reviseBuiltStops(){
+  const byId=state.leadsById||new Map((state.leads||[]).map(lead=>[lead.id, lead]));
+  const revised=reviseBuiltRoute(state.routeStops, state.selected, byId);
+  if(!revised.stops.length){invalidateBuiltRoute();return;}
+  state.routeStops=revised.stops;
+  state.routeGeometry=null;
+  state.routeStale=true;
+  state.routeBuildKey=routeBuildKey();
+  if(state.routeLine&&state.map){state.map.removeLayer(state.routeLine);state.routeLine=null;}
+  drawRoutePreview(false);
+  renderRouteStops();
+  publishRouteState();
+  if($('optimizeRouteBtn'))$('optimizeRouteBtn').textContent='Re-optimize';
+  if($('routeTrayNote'))$('routeTrayNote').textContent=revised.appended?'New stop added. Re-optimize to refresh the drive order.':'Stop removed. Re-optimize to refresh the drive order.';
 }
 async function optimizeAndDrawRoute(){
   if(state.routeBuilding || window.tnFeatureAllowed?.('routes')===false)return;
@@ -1860,14 +1879,14 @@ async function optimizeAndDrawRoute(){
   if(!leads.length){alert('Select mapped houses first. Unmapped addresses need geocoding before they can be optimized.');return}
   if(raw.length>max)$('routeWarning').textContent=`Using the first ${max} mapped selections.`;else if(mapped.length<raw.length)$('routeWarning').textContent=`${raw.length-mapped.length} selected houses have no coordinates yet.`;else $('routeWarning').textContent='';
   const start=state.currentLocation||{lat:leads[0].lat,lng:leads[0].lng};
-  state.routeBuilding=true;state.routeBuildKey=routeBuildKey();
+  state.routeBuilding=true;state.routeBuildKey=routeBuildKey();state.routeStale=false;
   $('routeTrayBtn').disabled=true;$('optimizeRouteBtn').disabled=true;
   state.routeStops=nearestNeighbor2Opt(leads,start);
   publishRouteState();
   renderRouteStops();
   $('routeDistance').textContent='Optimizing…';
   try{await fetchRoadRoute(start,state.routeStops);}
-  finally{state.routeBuilding=false;updateSelectedBadge();$('optimizeRouteBtn').textContent=state.routeStops.length?'Rebuild route':'Build route';}
+  finally{state.routeBuilding=false;updateSelectedBadge();$('optimizeRouteBtn').textContent=state.routeStops.length?'Rebuild route':'Build route';if(state.routeStops.length&&$('routeTrayNote')&&/Re-optimize to refresh/.test($('routeTrayNote').textContent))$('routeTrayNote').textContent='Select homes, then build an optimized route.';}
 }
 async function fetchRoadRoute(start,stops){
   const request=state.routeRequestSeq=(state.routeRequestSeq||0)+1;
@@ -1897,15 +1916,27 @@ function drawRoutePreview(fit=true){
   if(state.routeLine){state.map.removeLayer(state.routeLine);state.routeLine=null}
   if(!state.routeStops?.length||!state.map)return;
   if(state.navigating){drawNavOverlay();return}
-  if(state.routeGeometry)state.routeLine=L.geoJSON(state.routeGeometry,{style:{color:'#0267ee',weight:5,opacity:.78}}).addTo(state.map);
-  else{const coords=state.routeStops.map(l=>[Number(l.lat),Number(l.lng)]);state.routeLine=L.polyline(coords,{weight:5,opacity:.75,dashArray:'8 7'}).addTo(state.map);}
-  if(fit){try{state.map.fitBounds(state.routeLine.getBounds().pad(.12));}catch{}}
+  if(state.routeGeometry)state.routeLine=L.geoJSON(state.routeGeometry,{interactive:false,style:{color:'#0267ee',weight:5,opacity:.78}}).addTo(state.map);
+  else{const coords=state.routeStops.map(l=>[Number(l.lat),Number(l.lng)]);state.routeLine=L.polyline(coords,{weight:5,opacity:.75,dashArray:'8 7',interactive:false}).addTo(state.map);}
+  if(fit){
+    try{state.map.fitBounds(state.routeLine.getBounds().pad(.35),{animate:false,maxZoom:17,paddingTopLeft:[24,88],paddingBottomRight:[24,140]});}catch{}
+    redrawPins();
+  }
+}
+function redrawPins(){
+  if(!state.map)return;
+  state.pinShown.forEach(id=>{
+    const lead=state.leadsById.get(id);
+    const marker=state.pinMarkers.get(id);
+    if(lead&&marker) marker.setLatLng([Number(lead.lat), Number(lead.lng)]);
+  });
+  state.pinRenderer?._update?.();
 }
 function renderRouteStops(){
   $('openGoogleRouteBtn').disabled=!state.routeStops.length;
   $('optimizeRouteBtn').hidden=!state.routeStops.length;
   $('routeStops').innerHTML=state.routeStops.map((l,i)=>`<div class="routeStop"><span>${i+1}</span><div><b>${esc(l.address)}</b><small>${esc(l.city)} · ${scoreLead(l)} pts</small></div><button type="button" aria-label="Remove ${esc(l.address || 'stop')} from route" data-route-lead="${esc(l.id)}">×</button></div>`).join('')||'<div class="empty">No route yet.</div>';
-  $('routeStops').querySelectorAll('[data-route-lead]').forEach(btn=>btn.onclick=()=>{state.selected.delete(btn.dataset.routeLead);invalidateBuiltRoute();updateSelectedBadge();refreshSelectedMarkers();renderWorkList()});
+  $('routeStops').querySelectorAll('[data-route-lead]').forEach(btn=>btn.onclick=()=>{state.selected.delete(btn.dataset.routeLead);updateSelectedBadge();refreshSelectedMarkers();renderWorkList();rememberRouteChange();});
 }
 function openGoogleRouteBlocks(){
   if(!state.routeStops.length){alert('Optimize a route first.');return}
@@ -2355,7 +2386,11 @@ function locate(){
 locate._seq=0;
 
 function updateSelectedBadge(options={}){
-  if(state.routeBuildKey && state.routeBuildKey!==routeBuildKey())invalidateBuiltRoute();
+  const nextKey=routeBuildKey();
+  if(state.routeBuildKey && state.routeBuildKey!==nextKey){
+    if(state.routeStops?.length && selectionOnlyChange(state.routeBuildKey, nextKey)) reviseBuiltStops();
+    else invalidateBuiltRoute();
+  }
   publishRouteState();
   const prev=state.routeCountSeen;
   const n=state.selected.size;
@@ -2392,6 +2427,7 @@ function setRouteTrayCollapsed(collapsed,{persist=true}={}){
   if(persist){try{localStorage.setItem(ROUTE_TRAY_KEY,on?'1':'0');}catch{}}
   updateRouteTraySummary();
   liftMapChrome();
+  state.map?.invalidateSize({animate:false});
 }
 function applyAreaRoute(result){
   const stops=result?.stops||[];
@@ -2420,13 +2456,16 @@ function openRouteFromChrome(){
   $('routeTray').scrollIntoView({block:'nearest'});
   openRoutePanel();
 }
+function syncRouteChecks(id){
+  document.querySelectorAll(`.rowCheck[data-id="${CSS.escape(id)}"]`).forEach(box=>{box.checked=state.selected.has(id)});
+}
 function toggleSelected(id){
   if(window.tnFeatureAllowed?.('routes')===false)return;
   if(state.routeViewOnly){state.routeViewOnly=false; showRouteBanner();}
   if(state.selected.has(id))state.selected.delete(id);
-  else if(state.selected.size>=ROUTE_STOP_LIMIT){toast(`Route stop limit is ${ROUTE_STOP_LIMIT}.`);return;}
+  else if(state.selected.size>=ROUTE_STOP_LIMIT){toast(`Route stop limit is ${ROUTE_STOP_LIMIT}.`);syncRouteChecks(id);return;}
   else state.selected.add(id);
-  document.querySelectorAll(`.rowCheck[data-id="${CSS.escape(id)}"]`).forEach(box=>{box.checked=state.selected.has(id)});
+  syncRouteChecks(id);
   updateSelectedBadge({expand:false});refreshSelectedMarkers();syncRouteButtons(id);
   rememberRouteChange();
 }
@@ -3050,18 +3089,19 @@ function routeSelfId(){
 }
 function rememberRouteChange(){
   if(state.routeViewOnly) return;
+  const leadIds=orderedRouteIds(state.routeStops, state.selected);
   if(state.routeFor){
-    writeRouteDraft(sessionStorage, {assigneeId:state.routeFor.id, name:state.routeFor.name, leadIds:[...state.selected], snapshot:state.routeSnapshot||[]});
+    writeRouteDraft(sessionStorage, {assigneeId:state.routeFor.id, name:state.routeFor.name, leadIds, snapshot:state.routeSnapshot||[]});
     return;
   }
-  persistOwnRoute();
+  persistOwnRoute(leadIds);
 }
-function persistOwnRoute(){
+function persistOwnRoute(leadIds=[...state.selected]){
   const owner=routeSelfId(); if(!owner) return;
   state.assignedRoutes=upsertAssignedRoute(state.assignedRoutes, {
     assigneeId:owner,
     createdBy:state.currentRep?.id||owner,
-    leadIds:[...state.selected],
+    leadIds,
     assigneeName:state.currentRep?.name||''
   });
   try{writeStoredRoutes(localStorage, state.assignedRoutes);}catch{}
@@ -3153,6 +3193,7 @@ function closeRouteForPicker(){$('routeForPicker')?.classList.add('hidden');}
 function beginRouteFor(rep){
   if(!canAssignRoutes(actingRole())||!rep) return;
   closeRouteForPicker();
+  invalidateBuiltRoute();
   if(!state.routeFor) state.routeSnapshot=[...state.selected];
   const existing=state.assignedRoutes.find(row=>row.assignee_id===rep.id);
   state.routeFor={id:rep.id, name:rep.name||'Employee'};
@@ -3170,6 +3211,7 @@ function editAssignedRoute(){
   showRouteBanner();
 }
 function closeRouteView(){
+  invalidateBuiltRoute();
   state.routeFor=null;
   state.routeViewOnly=false;
   state.selected=new Set(state.routeSnapshot||[]);
@@ -3184,8 +3226,10 @@ function cancelRouteFor(){
 }
 async function finishRouteFor(){
   const person=state.routeFor; if(!person) return;
+  const leadIds=orderedRouteIds(state.routeStops, state.selected);
+  invalidateBuiltRoute();
   const createdBy=state.currentRep?.id||routeSelfId()||person.id;
-  state.assignedRoutes=upsertAssignedRoute(state.assignedRoutes, {assigneeId:person.id, createdBy, leadIds:[...state.selected], assigneeName:person.name});
+  state.assignedRoutes=upsertAssignedRoute(state.assignedRoutes, {assigneeId:person.id, createdBy, leadIds, assigneeName:person.name});
   try{writeStoredRoutes(localStorage, state.assignedRoutes); clearRouteDraft(sessionStorage);}catch{}
   const saved=state.assignedRoutes.find(row=>row.assignee_id===person.id);
   const pushed=await pushAssignedRoute(saved);
@@ -3203,6 +3247,7 @@ async function finishRouteFor(){
 }
 function viewAssignedRoute(assigneeId){
   const route=state.assignedRoutes.find(row=>row.assignee_id===assigneeId); if(!route) return;
+  invalidateBuiltRoute();
   if(!state.routeFor) state.routeSnapshot=[...state.selected];
   const rep=state.reps.find(row=>row.id===assigneeId);
   state.routeFor={id:assigneeId, name:route.assignee_name||rep?.name||'Employee'};
@@ -3247,8 +3292,11 @@ window.__tnRoute={
     const rect=state.map.getContainer().getBoundingClientRect();
     return {x:rect.left+point.x, y:rect.top+point.y, address:lead.address||'', onRoute:state.selected.has(id)};
   },
-  focus(lat, lng, zoom){state.map?.setView([lat, lng], zoom); syncPins();},
-  selected(){return [...state.selected];}
+  focus(lat, lng, zoom){state.map?.setView([lat, lng], zoom, {animate:false}); syncPins();},
+  selected(){return [...state.selected];},
+  stops(){return (state.routeStops||[]).map(stop=>stop.id);},
+  tap(id){const marker=state.pinMarkers.get(id); if(!marker)return false; marker.fire('click'); return true;},
+  openPopup(id){const marker=state.pinMarkers.get(id); if(!marker)return false; marker.openPopup(); return true;}
 };
 function announce(message, ms=3200){
   state.doorUndo=null;
