@@ -681,3 +681,10 @@ boot().catch((error) => {
     document.getElementById("retryDashboard").onclick = () => location.reload();
   } else toastMsg(error.message || "Dashboard could not refresh.");
 });
+
+// Drop deleted profiles from cached team views immediately.
+document.addEventListener("tn-account-deleted", event => {
+  reps = reps.filter(rep => rep.id !== event.detail);
+  renderAll();
+  loadData().catch(console.error);
+});

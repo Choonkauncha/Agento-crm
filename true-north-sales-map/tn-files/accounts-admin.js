@@ -65,6 +65,9 @@ let notice = "";
 let openLink = null;
 let resetId = "";
 let accountsCacheReady = false;
+let archiveVisible = false;
+let archivedProfiles = [];
+let mutationPending = false;
 const accountFilters = { query: "", role: "", status: "" };
 
 async function show(force) {
@@ -160,6 +163,7 @@ function personCard(person) {
       <div class="tnAccountBtns">
         ${can ? '<button type="button" data-act="reset">Reset password</button>' : ""}
         ${canOff ? `<button type="button" data-act="active">${person.active ? "Turn off" : "Turn on"}</button>` : ""}
+        ${canManageAccount(me.role, person.role, "delete", opts) ? '<button type="button" data-act="delete">Delete profile</button>' : ""}
         ${canOpen ? '<button type="button" data-act="open">Open as this user</button>' : ""}
         <button type="button" data-act="work">Activity, files, forms</button>
       </div>
@@ -219,24 +223,37 @@ function render() {
     .join("");
   const cards = filteredPeople().map(personCard).join("");
 
-  root.innerHTML = `<div class="dashTitle"><div><div class="eyebrow">LOGINS</div><h1 class="tnTitle">Accounts</h1><p class="tnSub">Manage team access, review each person’s work, and keep roles clear.</p></div></div>
-    ${notice ? `<p class="tnBanner">${esc(notice)}</p>` : ""}
+  root.innerHTML = `<div class="dashTitle"><div><div class="eyebrow">LOGINS</div><h1 class="tnTitle">Accounts</h1><p class="tnSub">Manage team access, review each person’s work, and keep roles clear.</p></div>${me?.role === "admin" ? '<details class="accountSettings"><summary aria-label="Account settings" title="Account settings">⋮</summary><button type="button" id="tnShowArchive">Deleted profiles archive</button></details>' : ""}</div>
+    ${notice ? `<p class="tnBanner" role="status">${esc(notice)}</p>` : ""}
+    ${archiveVisible ? `<div class="tnCard"><h2>Deleted profiles archive</h2><button type="button" id="tnCloseArchive">Close archive</button>${archivedProfiles.map(person => `<article class="tnAccountCard"><b>${esc(person.name)}</b><span>${esc(person.email || "")} · ${esc(roleLabel(person.role))}</span><p>Deleted ${esc(when(person.deleted_at))}</p></article>`).join("") || '<p>No deleted profiles.</p>'}</div>` : ""}
     <details class="accountCreate"><summary>Add a teammate <span>Create a login and choose their role</span></summary><form id="tnCreateAccount" class="tnCard"><div class="accountCreateGrid">
       <label class="tnLabel" for="acctName">Name</label>
-      <input class="tnInput" id="acctName" required autocomplete="name">
+      <input class="tnInput" id="acctName" required minlength="2" maxlength="80" autocomplete="name">
       <label class="tnLabel" for="acctEmail">Email</label>
-      <input class="tnInput" id="acctEmail" type="email" required autocomplete="off">
+      <input class="tnInput" id="acctEmail" type="email" required maxlength="160" autocomplete="off">
       <label class="tnLabel" for="acctRole">Role</label>
       <select class="tnSelect" id="acctRole">${options}</select>
       <label class="tnLabel" for="acctPassword">Initial password</label>
-      <input class="tnInput" id="acctPassword" type="password" required minlength="8" autocomplete="new-password">
-      </div><button class="tnTap dark" type="submit">Create login</button>
+      <input class="tnInput" id="acctPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
+      </div><p class="tnHelp">Use 8–72 characters for the initial password. The teammate must choose a new password on first sign-in.</p><label class="tnHelp"><input type="checkbox" id="acctShowPassword"> Show initial password</label><button class="tnTap dark" type="submit">Create login</button>
     </form></details>
     <div class="profileSectionHead"><h2>Team profiles</h2><span id="accountResultCount">${filteredPeople().length} of ${people.length} people</span></div>
     <div class="accountFilters"><label>Search people<input class="tnInput" id="accountQuery" placeholder="Name or email" value="${esc(accountFilters.query)}"></label><label>Role<select class="tnSelect" id="accountRoleFilter"><option value="">All roles</option>${[...FIELD, ...ADMIN_EXTRA].map(([role, label]) => `<option value="${role}" ${accountFilters.role === role ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>Status<select class="tnSelect" id="accountStatusFilter"><option value="">All accounts</option><option value="active" ${accountFilters.status === "active" ? "selected" : ""}>Active</option><option value="inactive" ${accountFilters.status === "inactive" ? "selected" : ""}>Inactive</option></select></label></div>
     <div id="tnPeopleList" class="tnAccountList">${cards || '<div class="profileEmpty">No teammates yet. Add the first login above.</div>'}</div>`;
   document.getElementById("tnCreateAccount").onsubmit = createAccount;
+  document.getElementById("acctShowPassword").onchange = event => {
+    document.getElementById("acctPassword").type = event.target.checked ? "text" : "password";
+  };
   bindPersonActions(root);
+  document.getElementById("tnShowArchive")?.addEventListener("click", async () => {
+    try {
+      const result = await post({ action: "archive" });
+      archivedProfiles = result.profiles || [];
+      archiveVisible = true;
+      render();
+    } catch (error) { notice = error.message; render(); }
+  });
+  document.getElementById("tnCloseArchive")?.addEventListener("click", () => { archiveVisible = false; render(); });
   for (const [id, key] of [
     ["accountQuery", "query"],
     ["accountRoleFilter", "role"],
@@ -320,6 +337,14 @@ async function post(body) {
 
 async function createAccount(event) {
   event.preventDefault();
+  if (mutationPending) return;
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const values = Object.fromEntries(["acctName", "acctEmail", "acctRole"].map(id => [id, document.getElementById(id).value]));
+  mutationPending = true;
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = "Creating login…";
   notice = "";
   try {
     const result = await post({
@@ -338,15 +363,29 @@ async function createAccount(event) {
   } catch (error) {
     notice = error.message;
     render();
-  }
+    document.querySelector(".accountCreate").open = true;
+    for (const [id, value] of Object.entries(values)) document.getElementById(id).value = value;
+    document.getElementById("acctPassword").focus();
+  } finally { mutationPending = false; }
 }
 
 async function act(action, repId) {
+  if (mutationPending) return;
   const person = people.find((item) => item.id === repId);
+  if (!person) return;
   notice = "";
   openLink = null;
   try {
-    if (action === "reset") {
+    if (action === "delete") {
+      if (!confirm(`Delete ${person.name}'s profile and login permanently? Their profile will move to the archive. They will lose access. Leads, photos, and submitted forms are kept. Account-specific history is archived.`)) return;
+      mutationPending = true;
+      const result = await post({ action: "delete", repId });
+      people = people.filter(item => item.id !== repId);
+      resetId = "";
+      detail = null;
+      notice = "Profile deleted. Login removed and profile moved to the archive.";
+      document.dispatchEvent(new CustomEvent("tn-account-deleted", { detail: repId }));
+    } else if (action === "reset") {
       resetId = repId;
       render();
       return;
@@ -394,7 +433,7 @@ async function act(action, repId) {
   } catch (error) {
     notice = error.message;
     render();
-  }
+  } finally { mutationPending = false; }
 }
 
 async function saveReset(event, repId, password) {

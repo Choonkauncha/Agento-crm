@@ -19,7 +19,8 @@ const parts = [
   ['supabase/migrations/20261008_training_upload_rls.sql', '14. Training upload permissions'],
   ['supabase/migrations/20261008_inspection_folder_guard_fix.sql', '15. Preserve completed inspection folders'],
   ['supabase/migrations/20261009_coach_settings.sql', '16. Coach settings'],
-  ['supabase/migrations/20261010_integrity_access.sql', '17. Session readiness and atomic saves']
+  ['supabase/migrations/20261010_integrity_access.sql', '17. Session readiness and atomic saves'],
+  ['supabase/migrations/20261012_account_archive.sql', '18. Profile deletion and archive']
 ];
 
 export function buildSetupSql(root) {

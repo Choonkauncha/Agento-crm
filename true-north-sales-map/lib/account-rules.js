@@ -43,6 +43,7 @@ export function canManageAccount(actorRole, targetRole, action, { samePerson = f
   if (!MANAGEMENT_ROLES.includes(actorRole)) return false;
   if (!ALL_ROLES.includes(targetRole)) return false;
   if (targetRole === 'admin' && action !== 'create' && !samePerson) return false;
+  if (action === 'delete') return actorRole === 'admin' && targetRole !== 'admin' && !samePerson;
   if (action === 'open_as') return actorRole === 'admin' && !samePerson && targetRole !== 'admin';
   if (!['create', 'reset', 'deactivate', 'reactivate'].includes(action)) return false;
   if (action === 'create' && targetRole === 'canvasser') return false;

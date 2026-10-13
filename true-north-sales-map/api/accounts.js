@@ -113,6 +113,12 @@ export async function handleAccounts(request, { env = process.env, fetchImpl = f
     let body;
     try { body = await request.json(); } catch { throw fail('Invalid request.', 400); }
     const action = String(body.action || '');
+    if (action === 'archive') {
+      if (actor.rep.role !== 'admin') throw fail('Only an admin can view the archive.', 403);
+      const rows = await serviceFetch(env, fetchImpl, '/account_archive?select=id,name,email,role,deleted_at&order=deleted_at.desc');
+      return json({ ok: true, profiles: rows });
+    }
+    if (action === 'delete') return json(await deleteAccount(actor, body, env, fetchImpl));
     if (action === 'create') return json(await createLogin(actor, body, env, fetchImpl));
     if (action === 'reset') return json(await resetPassword(actor, body, env, fetchImpl));
     if (action === 'set-active') return json(await setActive(actor, body, env, fetchImpl));
@@ -320,3 +326,15 @@ export default {
     return handleAccounts(request);
   }
 };
+
+async function deleteAccount(actor, body, env, fetchImpl) {
+  if (actor.rep.role !== 'admin') throw fail('Only an admin can delete profiles.', 403);
+  if (!UUID.test(String(body.repId || ''))) throw fail('That person was not found.', 404);
+  const target = await repById(env, fetchImpl, body.repId);
+  if (target && !canManageAccount(actor.rep.role, target.role, 'delete', { samePerson: samePerson(actor, target) })) {
+    throw fail('Admin profiles cannot be deleted.', 403);
+  }
+  return serviceFetch(env, fetchImpl, '/rpc/delete_account_to_archive', {
+    method: 'POST', body: { p_actor_id: actor.rep.id, p_target_id: body.repId }
+  });
+}

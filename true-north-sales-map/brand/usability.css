@@ -116,3 +116,13 @@ body.tn-admin-workspace .rail [data-tab] { scroll-margin-inline: 12px; }
 }
 @media print { body.tn-workspace button { min-height: 0 !important; } }
 body.tn-map-workspace .routeTrayExtras > summary { min-height:44px; box-sizing:border-box; }
+
+/* Account settings and destructive actions stay distinct and touch-friendly. */
+#tnAccounts .accountSettings {position:relative;margin-left:auto;flex-shrink:0}
+#tnAccounts .accountSettings summary {list-style:none;cursor:pointer;display:grid;place-items:center;width:44px;height:44px;border:1px solid #d8e1ee;border-radius:12px;font-size:26px;background:#fff}
+#tnAccounts .accountSettings summary::-webkit-details-marker {display:none}
+#tnAccounts .accountSettings[open] button {position:absolute;right:0;top:50px;z-index:20;width:220px;padding:16px;border:1px solid #d8e1ee;border-radius:12px;background:#fff;box-shadow:0 8px 24px #12203820;text-align:left;cursor:pointer}
+#tnAccounts [data-act="delete"] {color:#a32626;border-color:#edcccc;background:#fff8f8}
+#tnAccounts button:disabled {opacity:.6;cursor:wait}
+#tnAccounts .accountCreate .tnHelp {margin:12px 0;display:block}
+#tnAccounts button:focus-visible,#tnAccounts summary:focus-visible {outline:3px solid #1e6bff;outline-offset:3px}
