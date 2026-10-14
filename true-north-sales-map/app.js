@@ -12,7 +12,7 @@ import { installMapBearing, setMapHeading } from './lib/map-bearing.js';
 import { createArrayCursor, leadCacheUsable, localStamp, mergeLeadDelta, newestUpdatedAt, nextObjectEnd, normalizeStamp, parseJsonArraySlice, planLeadSync, takeCompleteObjects } from './lib/lead-cache.js';
 import { clearLeadCache, leadCacheScope, readLeadCache, writeLeadCache } from './lib/lead-store.js';
 import { LEAD_OVERLAY_COLUMNS, LEAD_OVERLAY_OR, STATIC_LEAD_SOURCES, mergeLeadOverlay, pageRanges } from './lib/lead-sync.js';
-import { mountMapAssistant } from './tn-files/map-assistant.js';
+import { registerMapAssistant, runPendingAssistantCommand } from './tn-files/global-assistant.js';
 import { planTimedRoute } from './lib/timed-route.js';
 import { STREET_ZOOM, clusterLeads, pinDiff, sampleHeat } from './lib/pin-layer.js';
 import { HAIL_MILES, WARNING_COLORS, housesInStorm, readStormCache, reportMarkerText, writeStormCache } from './lib/storm-maps.js';
@@ -482,7 +482,7 @@ async function runEnterCloud(session){
   state.cacheScope=leadCacheScope(state.config?.url,user.id);
   if(typeof document!=='undefined'&&document.documentElement) document.documentElement.dataset.localRoutes='';
   state.mode='cloud'; state.session={...session,user}; state.user=user; state.currentRep=profile.data; hideLogin();
-  mountMapAssistant({sb:state.supabase,rep:state.currentRep,getMapContext:mapAssistantContext,executeMapAction:executeMapAssistantAction});
+  registerMapAssistant({sb:state.supabase,rep:state.currentRep,getMapContext:mapAssistantContext,executeMapAction:executeMapAssistantAction});
   if(epoch!==authEpoch) return;
   state.sessionReady=true;
   if(!state.map) initMapOnce();
@@ -510,6 +510,7 @@ async function runEnterCloud(session){
     if(epoch!==authEpoch) return;
     if(sideError) throw sideError;
     publishSideData();
+    await runPendingAssistantCommand().catch(error=>toast(error.message));
   }catch(e){
     if(!current()) return;
     console.error(e);

@@ -12,12 +12,12 @@ export function mountCoachOrb(canvas){
   program=gl.createProgram();
   gl.attachShader(program,shader(gl.VERTEX_SHADER,`attribute vec3 position;uniform float time;uniform float energy;varying vec3 normal;varying vec3 world;
   void main(){vec3 p=position;float pulse=1.+energy*.17+energy*.055*sin(p.y*14.+time*3.)*cos(p.x*13.-time*2.);p*=pulse;
-  float a=time*.14,c=cos(a),s=sin(a);mat3 rotation=mat3(c,0.,s,0.,1.,0.,-s,0.,c);p=rotation*p;normal=normalize(rotation*position);world=p;
+  float a=time*.14,c=cos(a),s=sin(a);float tilt=.35+sin(time*.17)*.16,ct=cos(tilt),st=sin(tilt);mat3 rotation=mat3(c,0.,s,0.,1.,0.,-s,0.,c)*mat3(1.,0.,0.,0.,ct,st,0.,-st,ct);p=rotation*p;normal=normalize(rotation*position);world=p;
   float perspective=2.9/(3.3-p.z);gl_Position=vec4(p.xy*perspective*.86,-p.z*.12,1.);}`));
   gl.attachShader(program,shader(gl.FRAGMENT_SHADER,`precision mediump float;uniform float wirePass;uniform float energy;uniform float speaking;varying vec3 normal;varying vec3 world;
   void main(){vec3 n=normalize(normal);float light=max(0.,dot(n,normalize(vec3(-.5,.8,1.))));float rim=pow(1.-abs(n.z),2.);
   vec3 base=mix(vec3(.01,.12,.22),vec3(.04,.62,.65),light);base=mix(base,vec3(.06,.31,.64),speaking*.35);base+=rim*vec3(.05,.32,.5);
-  vec3 line=mix(vec3(.22,.82,.87),vec3(.46,.65,1.),speaking);gl_FragColor=wirePass>.5?vec4(line*(.65+energy*.35),.38+energy*.4):vec4(base,1.);}`));
+  vec3 line=mix(vec3(.22,.82,.87),vec3(.46,.65,1.),speaking);gl_FragColor=wirePass>.5?vec4(line*(.65+energy*.35),.72+energy*.25):vec4(base*.75,.28);}`));
   gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Mesh program failed');
   const vertices=[],triangles=[],lines=[],rows=26,cols=40;
   for(let row=0;row<=rows;row++){const phi=Math.PI*row/rows;for(let col=0;col<=cols;col++){const theta=2*Math.PI*col/cols;vertices.push(Math.sin(phi)*Math.cos(theta),Math.cos(phi),Math.sin(phi)*Math.sin(theta));}}

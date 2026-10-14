@@ -81,6 +81,8 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
   let generation = 0;
   let startController = null;
   let setupTimer = null;
+  const voiceOwner=Symbol('live-voice');
+  const otherVoice=event=>{if(event.detail!==voiceOwner&&!stopped)stop();};
 
   const state = value => emit(onState, value);
   const level=(samples,kind)=>{let power=0,count=0;for(let i=0;i<samples.length;i+=8){power+=samples[i]*samples[i];count++;}emit(onAudioLevel,{[kind]:Math.min(1,Math.sqrt(power/Math.max(1,count))*3)});};
@@ -106,7 +108,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     if (current && current.readyState < 2) current.close(1000, 'Live Coach ended');
   }
 
-  function cleanup() { clearTimeout(setupTimer); setupTimer = null; cleanupAudio(); cleanupOutput(); cleanupSocket(); emit(onAudioLevel,{input:0,output:0}); }
+  function cleanup() { if(typeof document!=='undefined')document.removeEventListener('tn-live-voice-start',otherVoice);clearTimeout(setupTimer); setupTimer = null; cleanupAudio(); cleanupOutput(); cleanupSocket(); emit(onAudioLevel,{input:0,output:0}); }
 
   function playAudio(value) {
     if (stopped || paused || !outputContext || !value) return;
@@ -201,7 +203,9 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     if (!stopped) return;
     const attempt = ++generation;
     startController?.abort(); startController = new AbortController();
-    stopped = false; paused = false; state('connecting');
+    stopped = false; paused = false;
+    if(typeof document!=='undefined'){document.addEventListener('tn-live-voice-start',otherVoice);document.dispatchEvent(new CustomEvent('tn-live-voice-start',{detail:voiceOwner}));}
+    state('connecting');
     try {
       const session = await ctx.sb.auth.getSession();
       if (stopped || attempt !== generation) return;
