@@ -44,13 +44,13 @@ const shiftDayLoader = createShiftDayLoader({
     state.shifts = null;
     renderShiftDayState(date);
   },
-  onSuccess(data) {
+  onSuccess(data, date, { quiet = false } = {}) {
     state.shifts = data;
     if (state.selectedRepId && !data.people.some(person => person.rep.id === state.selectedRepId)) {
       state.selectedRepId = null;
       state.shiftFocus = false;
     }
-    renderShiftBoard();
+    renderShiftBoard({ quiet });
   },
   onError: (error, date) => renderShiftDayState(date, error)
 });
@@ -738,14 +738,19 @@ function setClockBusy(label) {
   if (button) button.disabled = true;
 }
 
+function widgetStatusKey(status){
+  return JSON.stringify([status?.rep?.id,status?.rep?.role,status?.isField,status?.isAdmin,status?.openShift?.id,status?.unread]);
+}
 async function refreshStatus() {
   if (!state.token) return;
   const ticket = shiftsTicket;
   const status = await api('/api/field?view=status');
   if (!state.token || (document.getElementById('shiftsApp') && ticket !== shiftsTicket)) return;
+  const before=widgetStatusKey(state.status);
   state.status = status;
   syncLocationSharing();
-  renderWidget();
+  if(before!==widgetStatusKey(status))renderWidget();
+  else renderClockLabel();
   watchIncoming(state.status);
   ensureRealtime().catch(() => {});
 }
@@ -980,7 +985,7 @@ function startWatchers() {
   clearInterval(state.ticker);
   state.poll = setInterval(() => {
     refreshStatus().catch(() => {});
-    if(document.getElementById('shiftsApp') && state.status?.isAdmin && state.shiftDate) loadShiftDay(state.shiftDate).catch(()=>{});
+    if(document.getElementById('shiftsApp') && state.status?.isAdmin && state.shiftDate) loadShiftDay(state.shiftDate,{quiet:true}).catch(()=>{});
     if (state.msgOpen && state.chatMode === 'chat' && state.activeRepId) {
       loadThread(state.activeRepId, { quiet: true }).catch(() => {});
     }
@@ -1184,6 +1189,12 @@ let shiftsTicket = 0;
 let shiftsUserId = null;
 
 async function enterShifts(session) {
+  if(session?.user?.id===shiftsUserId && state.status){
+    state.token=session.access_token;
+    await refreshStatus();
+    if(state.shifts)await loadShiftDay(state.shiftDate,{quiet:true});
+    return;
+  }
   const ticket = ++shiftsTicket;
   const stale = () => ticket !== shiftsTicket;
   shiftDayLoader.invalidate();
@@ -1242,11 +1253,19 @@ function destroyShiftMap() {
   state.map.remove();
   state.map = null;
   state.trailLayer = null;
+  state.shiftLayers=new Map();
 }
 
-async function loadShiftDay(date) {
+let quietShiftFlight=null;
+async function loadShiftDay(date,{quiet=false}={}) {
   // A cleared date picker has no day to fetch; leave the current screen intact.
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return;
+  if(quiet){
+    if(!state.shifts)return;
+    if(quietShiftFlight)return quietShiftFlight;
+    quietShiftFlight=shiftDayLoader.load(date,{quiet:true}).finally(()=>{quietShiftFlight=null;});
+    return quietShiftFlight;
+  }
   await shiftDayLoader.load(date);
 }
 
@@ -1294,7 +1313,8 @@ function personLine(person) {
   return bits.join(' · ');
 }
 
-function renderShiftBoard() {
+function renderShiftBoard({quiet=false}={}) {
+  if(quiet && document.getElementById('shiftMap')){patchShiftBoard();return;}
   destroyShiftMap();
   const data = state.shifts;
   const clockedIn = data.people.filter(person => person.shifts.some(shift => shift.open));
@@ -1317,20 +1337,20 @@ function renderShiftBoard() {
       <div class="${phoneFocus ? 'tnPhoneHide' : ''}">
         <section class="tnNow" data-tn-panel="shift-now" data-tn-rank="primary">
           <h2>Clocked in now</h2>
-          ${clockedIn.length ? clockedIn.map(buttonFor).join('') : '<p class="tnShiftNote">Nobody is clocked in right now.</p>'}
+          <div id="tnShiftNowPeople">${clockedIn.length ? clockedIn.map(buttonFor).join('') : '<p class="tnShiftNote">Nobody is clocked in right now.</p>'}</div>
         </section>
         <section class="tnDayList" data-tn-panel="shift-day" data-tn-rank="secondary">
           <h2>This day</h2>
-          ${data.people.length ? data.people.map(buttonFor).join('') : '<p class="tnShiftNote">No shifts or location points on this day.</p>'}
+          <div id="tnShiftDayPeople">${data.people.length ? data.people.map(buttonFor).join('') : '<p class="tnShiftNote">No shifts or location points on this day.</p>'}</div>
         </section>
       </div>
       <div class="${phoneFocus ? '' : 'tnPhoneHide'}" data-tn-panel="shift-trail" data-tn-rank="primary">
         <header>
           <button type="button" class="tnBack" id="tnShiftBack">Back</button>
-          <h2 style="margin:8px 0 0;color:#0c1424">${selected ? esc(selected.rep.name) : 'Trail'}</h2>
+          <h2 id="tnShiftSelectedName" style="margin:8px 0 0;color:#0c1424">${selected ? esc(selected.rep.name) : 'Trail'}</h2>
         </header>
-        ${selected ? `<p class="tnMilesBig">${esc(formatMiles(selected.miles))} today</p>
-          <p class="tnShiftNote">${esc(formatHours(selected.totalHours))} on this day. ${selected.points.length} location point${selected.points.length === 1 ? '' : 's'}. ${selected.consent ? `Location agreed ${esc(easternStamp(selected.consent.consented_at))}.` : 'Has not agreed to location yet.'}</p>` : '<p class="tnShiftNote">Tap a person to see where they went today.</p>'}
+        <div id="tnShiftSelectedSummary">${selected ? `<p class="tnMilesBig">${esc(formatMiles(selected.miles))} today</p>
+          <p class="tnShiftNote">${esc(formatHours(selected.totalHours))} on this day. ${selected.points.length} location point${selected.points.length === 1 ? '' : 's'}. ${selected.consent ? `Location agreed ${esc(easternStamp(selected.consent.consented_at))}.` : 'Has not agreed to location yet.'}</p>` : '<p class="tnShiftNote">Tap a person to see where they went today.</p>'}</div>
         <div id="shiftMap" class="tnShiftMap"></div>
         <p class="tnPointMeta" id="shiftMapCaption"></p>
       </div>
@@ -1350,7 +1370,33 @@ function renderShiftBoard() {
   drawTrails();
 }
 
-function drawTrails() {
+function patchShiftBoard(){
+  const people=state.shifts?.people||[];
+  function roster(id,rows,empty){
+    const root=document.getElementById(id);if(!root)return;
+    const wanted=new Set(rows.map(person=>person.rep.id));
+    root.querySelectorAll('[data-rep]').forEach(node=>{if(!wanted.has(node.dataset.rep))node.remove();});
+    root.querySelector('.tnShiftEmpty')?.remove();
+    root.querySelectorAll(':scope > p').forEach(node=>node.remove());
+    rows.forEach(person=>{
+      let button=[...root.querySelectorAll('[data-rep]')].find(node=>node.dataset.rep===person.rep.id);
+      if(!button){button=document.createElement('button');button.type='button';button.dataset.rep=person.rep.id;button.className='tnPersonBtn';button.onclick=()=>{state.selectedRepId=person.rep.id;state.shiftFocus=true;renderShiftBoard();};root.append(button);}
+      button.classList.toggle('selected',person.rep.id===state.selectedRepId);
+      const html=`<strong>${person.shifts.some(shift=>shift.open)?'<span class="tnLive"></span>':''}${esc(person.rep.name)}</strong><span>${esc(personLine(person))}</span>`;
+      if(button.innerHTML!==html)button.innerHTML=html;
+    });
+    if(!rows.length){const node=document.createElement('p');node.className='tnShiftNote tnShiftEmpty';node.textContent=empty;root.append(node);}
+  }
+  roster('tnShiftNowPeople',people.filter(person=>person.shifts.some(shift=>shift.open)),'Nobody is clocked in right now.');
+  roster('tnShiftDayPeople',people,'No shifts or location points on this day.');
+  const selected=people.find(person=>person.rep.id===state.selectedRepId);
+  const title=document.getElementById('tnShiftSelectedName');if(title)title.textContent=selected?.rep?.name||'Trail';
+  const summary=document.getElementById('tnShiftSelectedSummary');
+  if(summary){const html=selected?`<p class="tnMilesBig">${esc(formatMiles(selected.miles))} today</p><p class="tnShiftNote">${esc(formatHours(selected.totalHours))} on this day. ${selected.points.length} location points.</p>`:'<p class="tnShiftNote">Tap a person to see where they went today.</p>';if(summary.innerHTML!==html)summary.innerHTML=html;}
+  drawTrails({fit:false});
+}
+
+function drawTrails({fit=true}={}) {
   const caption = document.getElementById('shiftMapCaption');
   const mapEl = document.getElementById('shiftMap');
   const phone = window.matchMedia('(max-width: 700px)').matches;
@@ -1367,34 +1413,35 @@ function drawTrails() {
     }).addTo(state.map);
     state.trailLayer = L.layerGroup().addTo(state.map);
   }
-  state.trailLayer.clearLayers();
-  const colors = ['#1e6bff', '#0c1424', '#2E6B4B', '#467c9e', '#A44835', '#A66B19', '#3E4E59'];
-  const people = state.shifts?.people || [];
-  const visible = people.filter(person => state.selectedRepId ? person.rep.id === state.selectedRepId : person.shifts.some(shift=>shift.open));
-  const bounds = [];
-  visible.forEach((person, index) => {
-    if (person.points.length < 1) return;
-    const selected = person.rep.id === state.selectedRepId;
-    const color = selected ? '#1e6bff' : colors[index % colors.length];
-    const latLngs = person.points.map(point => [Number(point.lat), Number(point.lng)]);
-    if (latLngs.length > 1) {
-      L.polyline(latLngs, { color, weight: selected ? 5 : 3, opacity: selected ? 0.95 : 0.55 }).addTo(state.trailLayer);
-    }
+  state.shiftLayers ||= new Map();
+  const people=state.shifts?.people||[];
+  const visible=people.filter(person=>state.selectedRepId?person.rep.id===state.selectedRepId:person.shifts.some(shift=>shift.open));
+  const visibleIds=new Set(visible.map(person=>person.rep.id));
+  for(const [id,layers] of state.shiftLayers){if(!visibleIds.has(id)){state.trailLayer.removeLayer(layers.group);state.shiftLayers.delete(id);}}
+  const bounds=[];
+  visible.forEach(person=>{
+    if(!person.points.length)return;
+    let layers=state.shiftLayers.get(person.rep.id);
+    if(!layers){layers={group:L.layerGroup().addTo(state.trailLayer),points:new Map(),line:null,latest:null};state.shiftLayers.set(person.rep.id,layers);}
+    const latLngs=person.points.map(point=>[Number(point.lat),Number(point.lng)]);
+    if(latLngs.length>1){if(layers.line)layers.line.setLatLngs(latLngs);else layers.line=L.polyline(latLngs,{color:'#1e6bff',weight:4,opacity:.75}).addTo(layers.group);}
     const latest=person.points.at(-1);
-    if(latest && person.shifts.some(shift=>shift.open)) L.marker([Number(latest.lat),Number(latest.lng)]).bindPopup(`<b>${esc(person.rep.name)}</b><br>Last location: ${esc(easternStamp(latest.captured_at))}<br>± ${esc(latest.accuracy_m ?? 'unknown')} m`).addTo(state.trailLayer);
-    person.points.forEach(point => {
-      const marker = L.circleMarker([Number(point.lat), Number(point.lng)], {
-        radius: selected ? 7 : 5,
-        color,
-        weight: 2,
-        fillColor: '#fff',
-        fillOpacity: 0.95
-      });
-      const accuracy = point.accuracy_m ? `<br>± ${esc(Math.round(Number(point.accuracy_m)))} m` : '';
-      marker.bindPopup(`<b>${esc(person.rep.name)}</b><br>${esc(pointLabel(point))}<br>${esc(easternStamp(point.captured_at))}${accuracy}`);
-      marker.addTo(state.trailLayer);
-      if (selected || !state.selectedRepId) bounds.push([Number(point.lat), Number(point.lng)]);
+    if(person.shifts.some(shift=>shift.open)){
+      const location=[Number(latest.lat),Number(latest.lng)];
+      const popup=`<b>${esc(person.rep.name)}</b><br>Last location: ${esc(easternStamp(latest.captured_at))}<br>± ${esc(latest.accuracy_m??'unknown')} m`;
+      if(layers.latest){layers.latest.setLatLng(location);layers.latest.setPopupContent(popup);}
+      else layers.latest=L.marker(location).bindPopup(popup).addTo(layers.group);
+    }else if(layers.latest){layers.group.removeLayer(layers.latest);layers.latest=null;}
+    const pointIds=new Set();
+    person.points.forEach(point=>{
+      const id=point.id||`${point.captured_at}:${point.kind}:${point.lat}:${point.lng}`;pointIds.add(id);
+      if(!layers.points.has(id)){
+        const marker=L.circleMarker([Number(point.lat),Number(point.lng)],{radius:5,color:'#1e6bff',weight:2,fillColor:'#fff',fillOpacity:.9});
+        marker.bindPopup(`<b>${esc(person.rep.name)}</b><br>${esc(pointLabel(point))}<br>${esc(easternStamp(point.captured_at))}`).addTo(layers.group);layers.points.set(id,marker);
+      }
     });
+    for(const [id,marker] of layers.points){if(!pointIds.has(id)){layers.group.removeLayer(marker);layers.points.delete(id);}}
+    bounds.push(...latLngs);
   });
   const selected = people.find(person => person.rep.id === state.selectedRepId);
   if (caption) {
@@ -1403,7 +1450,7 @@ function drawTrails() {
       : 'Clocked-in team: latest saved locations. Select a person for their trail. Updates refresh every 15 seconds; timestamps show when each location was saved.';
   }
   scheduleShiftMapResize(60);
-  if (bounds.length) state.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
+  if (fit && bounds.length) state.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
 }
 
 function scheduleShiftMapResize(delay) {

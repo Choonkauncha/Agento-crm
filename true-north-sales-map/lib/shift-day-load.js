@@ -3,16 +3,16 @@ export function createShiftDayLoader({ fetchDay, isAuthorized, onLoading, onSucc
   let generation = 0;
   return {
     invalidate() { generation += 1; },
-    async load(date) {
+    async load(date, { quiet = false } = {}) {
       const ticket = ++generation;
       const current = () => ticket === generation && isAuthorized();
       if (!current()) return;
-      onLoading(date);
+      if (!quiet) onLoading(date);
       try {
         const data = await fetchDay(date);
-        if (current()) onSuccess(data, date);
+        if (current()) onSuccess(data, date, { quiet });
       } catch (error) {
-        if (current()) onError(error, date);
+        if (current() && !quiet) onError(error, date);
       }
     }
   };

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
+const source=readFileSync(new URL('../field-ops.js',import.meta.url),'utf8');
+const code=source.slice(source.indexOf('function drawTrails('),source.indexOf('function scheduleShiftMapResize('));
+let fits=0,created=0,moves=0;
+const layer=()=>({addTo(){return this;},bindPopup(){return this;},setLatLng(){moves++;return this;},setPopupContent(){return this;},setLatLngs(){return this;},removeLayer(){},remove(){}});
+const L={layerGroup:()=>layer(),polyline:()=>layer(),circleMarker:()=>layer(),marker:()=>{created++;return layer();}};
+const point={id:'p1',lat:40,lng:-82,captured_at:'2026-10-14T20:00:00Z'};
+const state={map:{fitBounds(){fits++;}},trailLayer:layer(),selectedRepId:null,shifts:{people:[{rep:{id:'r1',name:'Setter'},shifts:[{open:true}],points:[point],miles:0}]}};
+const ctx=vm.createContext({state,L,window:{L,matchMedia:()=>({matches:false})},document:{getElementById:id=>id==='shiftMapCaption'?{}:{closest:()=>null}},esc:String,easternStamp:String,pointLabel:()=>'',formatMiles:String,scheduleShiftMapResize:()=>{}});
+vm.runInContext(code+';drawTrails();',ctx);assert.equal(fits,1);assert.equal(created,1);
+const originalMarker=state.shiftLayers.get('r1').latest;
+state.shifts.people[0].points.push({...point,id:'p2',lat:40.001});
+vm.runInContext('drawTrails({fit:false});',ctx);
+assert.equal(fits,1);assert.equal(created,1);assert.equal(moves,1);assert.equal(state.shiftLayers.get('r1').latest,originalMarker);assert.equal(state.shiftLayers.get('r1').points.size,2);
+console.log('Quiet location UI keeps map/camera/marker instances and appends new points');

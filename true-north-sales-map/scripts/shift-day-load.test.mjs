@@ -74,3 +74,13 @@ await retry;
 assert.deepEqual(visible.at(-1), ['success', '2026-10-07', []]);
 
 console.log('Shift day loading: latest selection, late errors, session invalidation and retry passed.');
+
+// Quiet location polling keeps existing content visible and suppresses transient errors.
+{
+ let loading=0,errors=0,success=[];
+ let reject=false;
+ const quiet=createShiftDayLoader({isAuthorized:()=>true,fetchDay:async()=>{if(reject)throw Error('offline');return {people:[]};},onLoading:()=>loading++,onSuccess:(data,date,options)=>success.push(options),onError:()=>errors++});
+ await quiet.load('2026-10-14',{quiet:true});assert.equal(loading,0);assert.equal(success[0].quiet,true);
+ reject=true;await quiet.load('2026-10-14',{quiet:true});assert.equal(errors,0);
+ console.log('Quiet shift polling preserves content on load and transient error');
+}
