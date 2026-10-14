@@ -21,17 +21,19 @@ export function clusterLeads(leads, zoom) {
     const key = `${Math.floor(lat / cell)}:${Math.floor(lng / cell)}`;
     let bucket = groups.get(key);
     if (!bucket) {
-      bucket = { lat: 0, lng: 0, count: 0 };
+      bucket = { lat: 0, lng: 0, count: 0, leadIds: [] };
       groups.set(key, bucket);
     }
     bucket.lat += lat;
     bucket.lng += lng;
     bucket.count += 1;
+    if(lead.id) bucket.leadIds.push(lead.id);
   });
   return [...groups.values()].map((bucket) => ({
     lat: bucket.lat / bucket.count,
     lng: bucket.lng / bucket.count,
-    count: bucket.count
+    count: bucket.count,
+    leadIds: bucket.leadIds
   }));
 }
 

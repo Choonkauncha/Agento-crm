@@ -12,6 +12,8 @@ import { installMapBearing, setMapHeading } from './lib/map-bearing.js';
 import { createArrayCursor, leadCacheUsable, localStamp, mergeLeadDelta, newestUpdatedAt, nextObjectEnd, normalizeStamp, parseJsonArraySlice, planLeadSync, takeCompleteObjects } from './lib/lead-cache.js';
 import { clearLeadCache, leadCacheScope, readLeadCache, writeLeadCache } from './lib/lead-store.js';
 import { LEAD_OVERLAY_COLUMNS, LEAD_OVERLAY_OR, STATIC_LEAD_SOURCES, mergeLeadOverlay, pageRanges } from './lib/lead-sync.js';
+import { mountMapAssistant } from './tn-files/map-assistant.js';
+import { planTimedRoute } from './lib/timed-route.js';
 import { STREET_ZOOM, clusterLeads, pinDiff, sampleHeat } from './lib/pin-layer.js';
 import { HAIL_MILES, WARNING_COLORS, housesInStorm, readStormCache, reportMarkerText, writeStormCache } from './lib/storm-maps.js';
 import { readSavedLayers, resolveLayers, writeSavedLayers } from './lib/map-layers.js';
@@ -480,6 +482,7 @@ async function runEnterCloud(session){
   state.cacheScope=leadCacheScope(state.config?.url,user.id);
   if(typeof document!=='undefined'&&document.documentElement) document.documentElement.dataset.localRoutes='';
   state.mode='cloud'; state.session={...session,user}; state.user=user; state.currentRep=profile.data; hideLogin();
+  mountMapAssistant({sb:state.supabase,rep:state.currentRep,getMapContext:mapAssistantContext,executeMapAction:executeMapAssistantAction});
   if(epoch!==authEpoch) return;
   state.sessionReady=true;
   if(!state.map) initMapOnce();
@@ -1257,6 +1260,15 @@ function addHouseToRoute(id){
   rememberRouteChange();
   toastRouteAdded(lead);
 }
+function selectClusterAddresses(cluster){
+  if(window.tnFeatureAllowed?.('routes')===false)return;
+  const before=state.selected.size;
+  for(const id of cluster.leadIds){if(state.selected.size>=ROUTE_STOP_LIMIT)break;state.selected.add(id);}
+  updateSelectedBadge();refreshSelectedMarkers();renderWorkList();rememberRouteChange();openRouteFromChrome();
+  const added=state.selected.size-before;
+  const remaining=cluster.leadIds.filter(id=>!state.selected.has(id)).length;
+  toast(`${added} addresses added.${remaining?` Route limit reached; ${remaining} addresses remain unselected.`:''}`);
+}
 function clusterIcon(count){
   const size=count>999?52:count>99?48:44;
   return L.divIcon({className:'pinCluster', html:`<span>${fmt(count)}</span>`, iconSize:[size,size], iconAnchor:[size/2,size/2]});
@@ -1315,7 +1327,16 @@ function syncPins(options={}){
     state.pinClusters.clearLayers();
     clusters.forEach(cluster=>{
       const marker=L.marker([cluster.lat, cluster.lng],{icon:clusterIcon(cluster.count), keyboard:true, title:`${fmt(cluster.count)} homes`});
-      marker.on('click',()=>state.map.setView([cluster.lat, cluster.lng], Math.min(STREET_ZOOM, zoom+2)));
+      const menu=document.createElement('div');menu.className='clusterMenu';
+      const label=document.createElement('b');label.textContent=`${fmt(cluster.count)} addresses in this area`;
+      const select=document.createElement('button');select.type='button';select.textContent='Select all addresses';
+      select.onclick=()=>{selectClusterAddresses(cluster);marker.closePopup();};
+      const zoomButton=document.createElement('button');zoomButton.type='button';zoomButton.textContent='Zoom into area';
+      zoomButton.onclick=()=>{marker.closePopup();state.map.setView([cluster.lat,cluster.lng],Math.min(STREET_ZOOM,zoom+2));};
+      menu.append(label,select,zoomButton);marker.bindPopup(menu,{closeButton:true,autoPan:false});
+      marker.on('mouseover',()=>marker.openPopup());
+      marker.on('contextmenu',event=>{event.originalEvent?.preventDefault();marker.openPopup();});
+      marker.on('click',()=>marker.openPopup());
       state.pinClusters.addLayer(marker);
     });
     syncRouteBadges();
@@ -1895,6 +1916,7 @@ async function optimizeAndDrawRoute(){
   if(!leads.length){alert('Select mapped houses first. Unmapped addresses need geocoding before they can be optimized.');return}
   if(raw.length>max)$('routeWarning').textContent=`Using the first ${max} mapped selections.`;else if(mapped.length<raw.length)$('routeWarning').textContent=`${raw.length-mapped.length} selected houses have no coordinates yet.`;else $('routeWarning').textContent='';
   const start=state.currentLocation||{lat:leads[0].lat,lng:leads[0].lng};
+  state.routeDurationSeconds=0;
   state.routeBuilding=true;state.routeBuildKey=routeBuildKey();state.routeStale=false;
   $('routeTrayBtn').disabled=true;$('optimizeRouteBtn').disabled=true;
   state.routeStops=nearestNeighbor2Opt(leads,start);
@@ -1909,7 +1931,7 @@ async function fetchRoadRoute(start,stops){
   try{const points=[start,...stops].map(p=>({lat:p.lat,lng:p.lng}));const r=await fetch('/api/route',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({profile:osrmProfile(state.routeMode),coordinates:points})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Route service failed');
     if(request!==state.routeRequestSeq)return;
     if(Array.isArray(data.order)&&data.order.length===stops.length){const ordered=data.order.map(i=>stops[i-1]).filter(Boolean);if(ordered.length===stops.length){state.routeStops=ordered;renderRouteStops();}}
-    state.routeGeometry=data.geometry||null;
+    state.routeGeometry=data.geometry||null;state.routeDurationSeconds=Number(data.duration)||0;
     drawRoutePreview(!state.navigating);
     const summary=`${fmtDistance(data.distance/1609.344)} · ${fmtDuration(data.duration)} · ${state.routeMode==='walking'?'walking':'driving'}`;
     $('routeDistance').textContent=`${summary} · road-network optimized`;
@@ -3306,6 +3328,58 @@ function renderAssignedRouteList(){
   el.querySelectorAll('[data-route-edit]').forEach(btn=>{btn.onclick=()=>{const rep=state.reps.find(row=>row.id===btn.dataset.routeEdit)||{id:btn.dataset.routeEdit, name:state.assignedRoutes.find(row=>row.assignee_id===btn.dataset.routeEdit)?.assignee_name||'Employee'}; beginRouteFor(rep);};});
   el.querySelectorAll('[data-route-delete]').forEach(btn=>{btn.onclick=()=>deleteAssignedRoute(btn.dataset.routeDelete);});
 }
+function mapAssistantContext(){
+  return {updatedAt:new Date().toISOString(),travelMode:state.routeMode,visibleAddressCount:state.filtered.length,
+    selectedCount:state.selected.size,navigating:state.navigating,currentStop:state.routeStops[state.navIndex]?.address||null,
+    route:state.routeStops.map(lead=>({id:lead.id,address:addressOf(lead)})),
+    visibleAreas:[...new Set(state.filtered.map(lead=>lead.city).filter(Boolean))].slice(0,40),
+    selectedAddresses:[...state.selected].slice(0,80).map(id=>({id,address:addressOf(state.leadsById.get(id)||{})}))};
+}
+async function executeMapAssistantAction(name,args){
+  if(!state.sessionReady||state.mode!=='cloud')throw Error('Sign in again.');
+  if(window.tnFeatureAllowed?.('routes')===false)throw Error('Routes are disabled for your role.');
+  if(name==='build_timed_route'){
+    if(state.routeBuilding)throw Error('A route is already being built. Try again when it finishes.');
+    const actor=state.user?.id;
+    if(state.navigating)throw Error('End current navigation before replacing its route.');
+    const candidates=state.selected.size?[...state.selected].map(id=>state.leadsById.get(id)):state.filtered;
+    const plan=planTimedRoute(candidates,{minutes:args.minutes,stopMinutes:args.stop_minutes,mode:args.mode||state.routeMode,start:state.currentLocation,limit:ROUTE_STOP_LIMIT});
+    if(!plan.stops.length)throw Error('No mapped addresses are available in this area.');
+    state.routeMode=args.mode||state.routeMode;if($('routeMode'))$('routeMode').value=state.routeMode;
+    state.selected=new Set(plan.stops.map(lead=>lead.id));$('routeCount').value=Math.min(80,Math.max(5,plan.stops.length));
+    updateSelectedBadge();refreshSelectedMarkers();renderWorkList();
+    await optimizeAndDrawRoute();
+    if(!state.sessionReady||state.user?.id!==actor)throw Error('Account changed while building the route.');
+    // Keep road travel and stop time inside the requested budget when the road router is available.
+    let attempts=0;
+    while(state.routeDurationSeconds && state.routeStops.length>1 && state.routeDurationSeconds/60+state.routeStops.length*plan.stopMinutes>args.minutes*1.1 && attempts++<4){
+      const ratio=args.minutes/(state.routeDurationSeconds/60+state.routeStops.length*plan.stopMinutes);
+      state.selected=new Set(state.routeStops.slice(0,Math.max(1,Math.floor(state.routeStops.length*ratio))).map(lead=>lead.id));
+      updateSelectedBadge();await optimizeAndDrawRoute();
+      if(!state.sessionReady||state.user?.id!==actor)throw Error('Account changed while building the route.');
+    }
+    rememberRouteChange();refreshSelectedMarkers();renderWorkList();
+    const travel=state.routeDurationSeconds?state.routeDurationSeconds/60:null;
+    const estimated=Math.round((travel??plan.travelMinutes)+state.routeStops.length*plan.stopMinutes);
+    return {status:'built',stops:state.routeStops.length,estimatedMinutes:estimated,targetMinutes:args.minutes,stopMinutes:plan.stopMinutes,roadTravelMinutes:travel?Math.round(travel):null,approximate:true,estimateSource:travel?'road routing plus visit time':'straight-line estimate; road router unavailable',limitedByAvailableAddresses:plan.stops.length===plan.available,notice:'Includes estimated time at each house. Actual visits and traffic vary. Review the route, then start navigation.'};
+  }
+  if(name==='remove_route_stop'){
+    const match=state.routeStops.find(lead=>lead.id===args.stop||addressOf(lead).toLowerCase()===args.stop.toLowerCase());
+    if(!match)throw Error('Stop not found. Read the current route first.');
+    if(state.selected.has(match.id))toggleSelected(match.id);renderWorkList();return {status:'removed',address:addressOf(match),remaining:state.routeStops.length};
+  }
+  if(name==='route_navigation'){
+    if(args.action==='start'){beginInAppNav();return {status:state.navigating?'started':'not_started'};}
+    if(args.action==='pause'){pauseNavigation();return {status:'paused'};}
+    if(args.action==='resume'){resumeNavigation();return {status:state.navigating?'resumed':'not_active'};}
+    endNavigation('Navigation ended.');return {status:'ended'};
+  }
+  if(name==='select_visible_addresses'){
+    selectClusterAddresses({leadIds:state.filtered.filter(isCoords).map(lead=>lead.id)});return {status:'selected',selectedCount:state.selected.size,limit:ROUTE_STOP_LIMIT};
+  }
+  throw Error('Unsupported map command.');
+}
+
 window.__tnRoute={
   pinPoint(id){
     const lead=state.leadsById.get(id); if(!lead||!state.map) return null;

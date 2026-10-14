@@ -62,3 +62,15 @@ assert.equal(quota.status, 429);
 assert.ok(Number(quota.headers.get('retry-after')) > 0);
 await assert.rejects(() => createGeminiLiveToken({ now: NOW, fetchImpl }), /API key/);
 console.log('Gemini Live token: auth, server-only key, ephemeral constraints and origin checks passed.');
+// Map voice uses the same declaration set in constrained token and client setup.
+{
+ const {fetchImpl,calls}=fakeFetch();
+ const req=new Request('https://app.example/api/live-token',{method:'POST',headers:{authorization:'Bearer real-user-token','content-type':'application/json'},body:JSON.stringify({workspace:'map'})});
+ const response=await handleLiveToken(req,{env:ENV,fetchImpl,now:NOW,limiter:createCoachLimiter()});
+ assert.equal(response.status,200);const data=await response.json();
+ assert.equal(data.workspace,'map');assert.ok(data.tools[0].functionDeclarations.some(t=>t.name==='build_timed_route'));
+ const mint=calls.find(c=>c.url.origin==='https://generativelanguage.googleapis.com');
+ assert.deepEqual(JSON.parse(mint.options.body).bidiGenerateContentSetup.tools,data.tools);
+ assert.ok(calls.some(c=>c.url.pathname==='/rest/v1/rpc/feature_enabled'&&JSON.parse(c.options.body).requested==='map'));
+ console.log('Map token context, permissions and matched function declarations passed');
+}

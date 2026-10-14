@@ -2,7 +2,9 @@ import { requireFeature } from '../lib/features.js';
 import { isUuid } from '../lib/field-rules.js';
 import { needsPasswordGate } from '../lib/must-change-password.js';
 import { buildCoachSnapshot, coachRoleAllowed, coachWindow, coachGreeting } from '../lib/coach.js';
-import { normalizeToolCall } from '../lib/voice-tools.js';
+import { recentOhioStorms } from '../lib/ohio-storms.js';
+import { buildCoachSnapshot as freshSnapshot } from '../lib/coach.js';
+import { validateMapTool, normalizeToolCall } from '../lib/voice-tools.js';
 import { planVoiceAction } from '../lib/voice-actions.js';
 
 const json=(body,status=200,headers={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'private, no-store','vary':'Authorization',...headers}});
@@ -34,7 +36,7 @@ export function createCoachLimiter({ clock = Date.now, maxUsers = 2000, maxReque
   };
 }
 
-export async function coachCaller(request,env,fetchImpl) {
+export async function coachCaller(request,env,fetchImpl,{map=false}={}) {
   const token=(request.headers.get('authorization')||'').match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if(!token||token===env.SUPABASE_SERVICE_ROLE_KEY)throw fail('Sign in to open your Coach.',401);
   const base=(env.SUPABASE_URL||'').replace(/\/$/,'');
@@ -52,7 +54,7 @@ export async function coachCaller(request,env,fetchImpl) {
   const rows=await read(`/rest/v1/reps?user_id=eq.${user.id}&active=eq.true&select=id,name,role&limit=1`);
   const rep=Array.isArray(rows)?rows.find(row=>isUuid(row.id)&&coachRoleAllowed(row.role)):null;
   if(!rep)throw fail('An active team profile is required for coaching.',403);
-  await requireFeature(request,'training',{env,fetchImpl});
+  await requireFeature(request,map?'map':'training',{env,fetchImpl});
   await requireFeature(request,'coach',{env,fetchImpl});
   const gate=await read('/rest/v1/rpc/password_gate_status',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
   if (!gate || typeof gate !== 'object' || Array.isArray(gate) || typeof gate.must_change !== 'boolean' || typeof gate.impersonating !== 'boolean') throw fail('Your account security status could not be verified. Try again.', 502);
@@ -101,8 +103,19 @@ export async function handleVoiceAction(request,{env=process.env,fetchImpl=fetch
   try {
     const origin=request.headers.get('origin');
     if(origin&&origin!==new URL(request.url).origin)return json({error:'Origin denied'},403);
-    const ctx=await coachCaller(request,env,fetchImpl);
     const body=await request.json();
+    const map=body.workspace==='map';
+    const ctx=await coachCaller(request,env,fetchImpl,{map});
+    if(map){
+      const call=validateMapTool(body.toolCall);
+      if(call.name==='get_live_context') return json({snapshot:freshSnapshot(ctx.rep,await loadCoachSources(ctx,new Date()),new Date())});
+      if(call.name==='recent_ohio_storms'){
+        await requireFeature(request,'weather',{env,fetchImpl});
+        return json(await recentOhioStorms({days:call.args.days,fetchImpl}));
+      }
+      await requireFeature(request,'routes',{env,fetchImpl});
+      return json({authorized:true,actorId:ctx.userId,execute:call});
+    }
     const action=normalizeToolCall(body?.toolCall);
     if(action.action==='route.build') {
       const result=planVoiceAction({role:ctx.rep.role,actorId:ctx.userId,...action,confirmed:false});

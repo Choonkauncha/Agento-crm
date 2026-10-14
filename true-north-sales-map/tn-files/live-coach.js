@@ -61,13 +61,14 @@ function emit(callback, value) { try { callback?.(value); } catch { /* UI callba
  * Browser-side Gemini Live transport. It receives only an ephemeral token from
  * /api/live-token; the long-lived Gemini key stays on the server.
  */
-export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires, onAudioLevel, setupTimeoutMs = 15000 } = {}) {
+export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires, onAudioLevel, executeMapTool, workspace, setupTimeoutMs = 15000 } = {}) {
   let socket = null;
   let stream = null;
   let inputContext = null;
   let inputSource = null;
   let processor = null;
   let outputContext = null;
+  let outputAnalyser=null, outputMeter=0;
   let nextOutputTime = 0;
   const outputSources = new Set();
   let stopped = true;
@@ -94,6 +95,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
   }
 
   function cleanupOutput() {
+    globalThis.cancelAnimationFrame?.(outputMeter);outputMeter=0;outputAnalyser=null;
     for (const source of outputSources) { try { source.stop(); } catch { /* Already ended. */ } try { source.disconnect(); } catch {} }
     outputSources.clear();
     outputContext?.close().catch(() => {}); outputContext = null; nextOutputTime = 0;
@@ -113,11 +115,11 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     const channel = buffer.getChannelData(0);
     for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 32768;
     const source = outputContext.createBufferSource();
-    source.buffer = buffer; source.connect(outputContext.destination);
+    source.buffer = buffer; source.connect(outputAnalyser||outputContext.destination);
     outputSources.add(source);
     source.onended = () => { outputSources.delete(source); if(!outputSources.size&&!stopped&&!paused)state('listening'); emit(onAudioLevel,{output:0}); try { source.disconnect(); } catch {} };
     const start = Math.max(outputContext.currentTime + 0.02, nextOutputTime);
-    level(channel,'output'); state('speaking');
+    if(!outputAnalyser)level(channel,'output');state('speaking');
     source.start(start); nextOutputTime = start + buffer.duration;
   }
 
@@ -125,6 +127,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     const session = await ctx.sb.auth.getSession();
     const token = session.data?.session?.access_token;
     if (!token) throw new Error('Sign in again to use voice actions.');
+    if(workspace==='map')return executeMapTool(call);
     const response = await fetch('/api/coach', {method:'POST', headers:{authorization:`Bearer ${token}`,'content-type':'application/json'}, body:JSON.stringify({toolCall:{name:call.name,args:call.args}}), signal:AbortSignal.timeout(12000)});
     const data = await response.json().catch(()=>({error:'Voice action failed'}));
     if (!response.ok) return {error:data.error || 'Action denied'};
@@ -204,7 +207,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       if (stopped || attempt !== generation) return;
       const accessToken = session.data?.session?.access_token;
       if (!accessToken) throw new Error('Sign in again to use Live Coach.');
-      const response = await fetch('/api/live-token', { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, signal: AbortSignal.any([startController.signal, AbortSignal.timeout(15000)]) });
+      const response = await fetch('/api/live-token', { method: 'POST', body:JSON.stringify({workspace}), headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, signal: AbortSignal.any([startController.signal, AbortSignal.timeout(15000)]) });
       const data = await response.json().catch(() => ({}));
       if (stopped || attempt !== generation) return;
       if (!response.ok || !data.token) throw new Error(data.error || 'Live voice is unavailable right now.');
@@ -214,6 +217,12 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       const url = `${LIVE_SOCKET}?access_token=${encodeURIComponent(data.token)}`;
       outputContext = new AudioContext({ sampleRate: OUTPUT_RATE });
       await outputContext.resume?.().catch(() => {});
+      if(outputContext.createAnalyser){
+      outputAnalyser=outputContext.createAnalyser();outputAnalyser.fftSize=256;outputAnalyser.connect(outputContext.destination);
+      const waveform=new Float32Array(256);
+      const meter=()=>{if(stopped||!outputAnalyser)return;outputAnalyser.getFloatTimeDomainData(waveform);level(waveform,'output');outputMeter=requestAnimationFrame(meter);};
+      outputMeter=requestAnimationFrame(meter);
+      }
       socket = new WebSocket(url);
       socket.binaryType = 'blob';
       setupTimer = setTimeout(() => {
@@ -221,7 +230,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       }, setupTimeoutMs);
       socket.onopen = () => {
         if (stopped || attempt !== generation) { cleanupSocket(); return; }
-        send({ setup: liveSetup({model,voice,systemInstruction:data.systemInstruction}) });
+        send({ setup: {...liveSetup({model,voice,systemInstruction:data.systemInstruction}),tools:data.tools||[]} });
       };
       socket.onmessage = event => {
         if (stopped || attempt !== generation) return;
