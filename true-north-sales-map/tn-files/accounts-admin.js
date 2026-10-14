@@ -225,7 +225,7 @@ function render() {
 
   root.innerHTML = `<div class="dashTitle"><div><div class="eyebrow">LOGINS</div><h1 class="tnTitle">Accounts</h1><p class="tnSub">Manage team access, review each person’s work, and keep roles clear.</p></div>${me?.role === "admin" ? '<details class="accountSettings"><summary aria-label="Account settings" title="Account settings">⋮</summary><button type="button" id="tnShowArchive">Deleted profiles archive</button></details>' : ""}</div>
     ${notice ? `<p class="tnBanner" role="status">${esc(notice)}</p>` : ""}
-    ${archiveVisible ? `<div class="tnCard"><h2>Deleted profiles archive</h2><button type="button" id="tnCloseArchive">Close archive</button>${archivedProfiles.map(person => `<article class="tnAccountCard"><b>${esc(person.name)}</b><span>${esc(person.email || "")} · ${esc(roleLabel(person.role))}</span><p>Deleted ${esc(when(person.deleted_at))}</p></article>`).join("") || '<p>No deleted profiles.</p>'}</div>` : ""}
+    ${archiveVisible ? `<div class="tnCard"><h2>Deleted profiles archive</h2><button type="button" id="tnCloseArchive">Close archive</button>${archivedProfiles.map(person => `<article class="tnAccountCard"><b>${esc(person.name)}</b><span>${esc(person.email || "")} · ${esc(roleLabel(person.role))}</span><p>Deleted ${esc(when(person.deleted_at))}</p><button type="button" data-purge-profile="${esc(person.id)}">Remove permanently</button></article>`).join("") || '<p>No deleted profiles.</p>'}</div>` : ""}
     <details class="accountCreate"><summary>Add a teammate <span>Create a login and choose their role</span></summary><form id="tnCreateAccount" class="tnCard"><div class="accountCreateGrid">
       <label class="tnLabel" for="acctName">Name</label>
       <input class="tnInput" id="acctName" required minlength="2" maxlength="80" autocomplete="name">
@@ -253,6 +253,15 @@ function render() {
       render();
     } catch (error) { notice = error.message; render(); }
   });
+  root.querySelectorAll('[data-purge-profile]').forEach(button=>button.addEventListener('click',async()=>{
+    if(mutationPending || !confirm('Permanently remove this archived profile and its saved account history?')) return;
+    mutationPending=true;button.disabled=true;
+    try{
+      await post({action:'delete',repId:button.dataset.purgeProfile});
+      archivedProfiles=archivedProfiles.filter(person=>person.id!==button.dataset.purgeProfile);
+      notice='Archived profile permanently removed.';
+    }catch(error){notice=error.message;}finally{mutationPending=false;render();}
+  }));
   document.getElementById("tnCloseArchive")?.addEventListener("click", () => { archiveVisible = false; render(); });
   for (const [id, key] of [
     ["accountQuery", "query"],
@@ -377,13 +386,13 @@ async function act(action, repId) {
   openLink = null;
   try {
     if (action === "delete") {
-      if (!confirm(`Delete ${person.name}'s profile and login permanently? Their profile will move to the archive. They will lose access. Leads, photos, and submitted forms are kept. Account-specific history is archived.`)) return;
+      if (!confirm(`Delete ${person.name}'s profile and login permanently? They will lose access and their profile, login, and account archive will be removed. Company leads, photos, and submitted forms are kept.`)) return;
       mutationPending = true;
       const result = await post({ action: "delete", repId });
       people = people.filter(item => item.id !== repId);
       resetId = "";
       detail = null;
-      notice = "Profile deleted. Login removed and profile moved to the archive.";
+      notice = "Profile and login permanently deleted.";
       document.dispatchEvent(new CustomEvent("tn-account-deleted", { detail: repId }));
     } else if (action === "reset") {
       resetId = repId;

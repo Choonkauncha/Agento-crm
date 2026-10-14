@@ -11,7 +11,7 @@ grant select on public.account_archive to authenticated;
 grant all on public.account_archive to service_role;
 drop policy if exists archive_admin_read on public.account_archive;
 create policy archive_admin_read on public.account_archive for select to authenticated
-  using (public.session_ready() and public.current_rep_role() = 'admin');
+  using (exists(select 1 from public.reps where user_id=auth.uid() and active and role='admin'));
 -- Prevent direct browser deletion from skipping archive/Auth cleanup.
 revoke delete on public.reps from authenticated;
 
@@ -21,7 +21,7 @@ declare actor public.reps%rowtype; target public.reps%rowtype;
   fk record; related jsonb := '{}'::jsonb; rows_json jsonb;
 begin
   select * into actor from public.reps where id=p_actor_id for update;
-  if actor.id is null or not actor.active or actor.role <> 'admin' then
+  if actor.id is null or actor.active is distinct from true or actor.role is distinct from 'admin' then
     raise exception 'Only an active admin can delete profiles';
   end if;
   select * into target from public.reps where id=p_target_id for update;
@@ -49,8 +49,12 @@ begin
     values(target.id,target.name,target.email,target.role,actor.id,to_jsonb(target) || jsonb_build_object('archived_history',related));
   insert into public.account_audit(actor_rep_id,target_rep_id,action,target_email,metadata)
     values(actor.id,target.id,'user_deleted',target.email,jsonb_build_object('role',target.role,'archive_id',target.id));
-  delete from public.impersonation_grants where user_id=target.user_id;
-  delete from public.impersonation_sessions where user_id=target.user_id;
+  if to_regclass('public.impersonation_grants') is not null then
+    execute 'delete from public.impersonation_grants where user_id=$1' using target.user_id;
+  end if;
+  if to_regclass('public.impersonation_sessions') is not null then
+    execute 'delete from public.impersonation_sessions where user_id=$1' using target.user_id;
+  end if;
   delete from auth.users where id=target.user_id;
   -- Also removes orphan profiles without an Auth login. Existing FK rules preserve company records.
   delete from public.reps where id=target.id;

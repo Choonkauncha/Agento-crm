@@ -334,7 +334,7 @@ async function deleteAccount(actor, body, env, fetchImpl) {
   if (target && !canManageAccount(actor.rep.role, target.role, 'delete', { samePerson: samePerson(actor, target) })) {
     throw fail('Admin profiles cannot be deleted.', 403);
   }
-  return serviceFetch(env, fetchImpl, '/rpc/delete_account_to_archive', {
+  return serviceFetch(env, fetchImpl, '/rpc/delete_account_permanently', {
     method: 'POST', body: { p_actor_id: actor.rep.id, p_target_id: body.repId }
   });
 }

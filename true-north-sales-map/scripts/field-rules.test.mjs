@@ -111,8 +111,9 @@ assert.equal(incomingAlert({}, { meId: 'rep' }).reason, 'empty');
 assert.equal(quotedTime('2026-10-08T04:00:00.000Z'), '"2026-10-08T04:00:00.000Z"');
 assert.throws(() => quotedTime('yesterday'), /timestamp/);
 
-assert.ok(sql.includes(NOTICE_VERSION));
-assert.ok(sql.includes(NOTICE_TEXT));
+const update = readFileSync(new URL('../supabase/migrations/20261014_live_location_and_accounts.sql', import.meta.url), 'utf8');
+assert.ok(update.includes(NOTICE_VERSION));
+assert.ok(update.includes(NOTICE_TEXT));
 assert.match(sql, /enable row level security/);
 assert.match(sql, /shifts_one_open_per_rep/);
 assert.match(sql, /mark_thread_read/);

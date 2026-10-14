@@ -315,7 +315,7 @@ async function clockIn(ctx, body) {
   if (!await consentRow(ctx)) throw fail('Agree to the location notice before clocking in.', 403, 'CONSENT_REQUIRED');
   if (await openShift(ctx)) throw fail('You are already clocked in.', 409);
   const coord = cleanCoord(body.lat, body.lng);
-  if (coord?.error) throw fail(coord.error, 400);
+  if (!coord || coord.error) throw fail(coord?.error || 'Allow location before clocking in.', 400);
   const created = await rest(ctx.token, 'shifts', {
     method: 'POST',
     body: {
@@ -367,6 +367,17 @@ async function doorPoint(ctx, body) {
   return { point, shiftId: shift.id };
 }
 
+async function liveLocation(ctx, body) {
+  if (!isFieldRole(ctx.rep.role)) throw fail('Location sharing is for field profiles.', 403);
+  if (!await consentRow(ctx)) throw fail('Agree to the updated location notice.',403,'CONSENT_REQUIRED');
+  const shift=await openShift(ctx);
+  if (!shift || shift.id!==body.shiftId) throw fail('This shift is no longer open.',409);
+  const coord=cleanCoord(body.lat,body.lng);
+  if (!coord || coord.error) throw fail(coord?.error || 'Location is required.',400);
+  const point=await insertPoint(ctx,{shiftId:shift.id,coord,accuracy:cleanAccuracy(body.accuracy),kind:'live',leadId:null,doorStatus:null});
+  return {point};
+}
+
 async function sendMessage(ctx, body) {
   const cleaned = cleanMessage(body.body);
   if (cleaned.error) throw fail(cleaned.error, 400);
@@ -408,6 +419,7 @@ async function handlePost(ctx, body) {
   if (action === 'consent') return saveConsent(ctx);
   if (action === 'clock-in') return clockIn(ctx, body);
   if (action === 'clock-out') return clockOut(ctx, body);
+  if (action === 'location') return liveLocation(ctx, body);
   if (action === 'door') return doorPoint(ctx, body);
   if (action === 'send') return sendMessage(ctx, body);
   if (action === 'read') return markRead(ctx, body);

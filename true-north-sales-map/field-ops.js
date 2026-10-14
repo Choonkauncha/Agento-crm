@@ -1,6 +1,6 @@
 import { createClient } from '/vendor/supabase/supabase.js';
 import './tn-files/password-reset.js';
-import { formatHours, formatMiles, incomingAlert, pointLabel, roleLabel } from './lib/field-rules.js';
+import { formatHours, formatMiles, incomingAlert, pointLabel, roleLabel, NOTICE_TEXT, NOTICE_VERSION } from './lib/field-rules.js';
 import { canUsePhotoBank, fieldHomeLinks } from './lib/role-access.js';
 import { mountSignInScreen, revealApp } from './brand/loader.js';
 import { createShiftDayLoader } from './lib/shift-day-load.js';
@@ -19,6 +19,8 @@ const state = {
   chatMode: 'chat',
   clockBusy: false,
   locationWarned: false,
+  consentBusy: false,
+  locationWatch: null, locationShift: null, locationSentAt: 0, locationSending: false,
   poll: null,
   ticker: null,
   channel: null,
@@ -150,6 +152,7 @@ function watchIncoming(status) {
 }
 
 function stopAlerts() {
+  stopLocationSharing();
   state.alertsPrimed = false;
   state.seenMessageIds.clear();
   if (state.channel && state.sb) state.sb.removeChannel(state.channel);
@@ -261,7 +264,7 @@ async function api(path, { method = 'GET', body, retried = false } = {}) {
   return data;
 }
 
-/** One browser fix. This is not a background watch. */
+// Obtain a fresh fix before starting a shift.
 function geolocate() {
   if (!navigator.geolocation) return Promise.resolve(null);
   return new Promise(resolve => {
@@ -276,6 +279,43 @@ function geolocate() {
     );
   });
 }
+
+function stopLocationSharing() {
+  if(state.locationWatch !== null) navigator.geolocation?.clearWatch(state.locationWatch);
+  state.locationWatch=null;state.locationShift=null;state.locationSentAt=0;
+}
+function syncLocationSharing() {
+  const shift=state.status?.openShift;
+  if(!state.token || !state.status?.isField || !shift){stopLocationSharing();return;}
+  if(state.status.consent?.notice_version !== NOTICE_VERSION){
+    stopLocationSharing();
+    if(!state.consentBusy){
+      state.consentBusy=true;
+      const token=state.token;
+      askConsent().then(()=>api('/api/field',{method:'POST',body:{action:'consent'}})).then(result=>{
+        if(state.token===token && state.status){state.status.consent=result.consent;syncLocationSharing();}
+      }).catch(error=>toast(error.message)).finally(()=>{state.consentBusy=false;});
+    }
+    return;
+  }
+  if(state.locationShift===shift.id || !navigator.geolocation) return;
+  stopLocationSharing();state.locationShift=shift.id;
+  state.locationWatch=navigator.geolocation.watchPosition(async position=>{
+    if(!state.token || state.status?.openShift?.id!==shift.id || state.locationSending || Date.now()-state.locationSentAt<30000) return;
+    state.locationSending=true;
+    try {
+      await api('/api/field',{method:'POST',body:{action:'location',shiftId:shift.id,lat:position.coords.latitude,lng:position.coords.longitude,accuracy:position.coords.accuracy}});
+      state.locationSentAt=Date.now();state.locationWarned=false;
+    } catch(error) {
+      if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused: '+error.message);}
+      if(error.status===409) stopLocationSharing();
+    } finally {state.locationSending=false;}
+  },()=>{
+    if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused. Allow location and keep this app open while on shift.');}
+  },{enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+}
+window.addEventListener('pagehide',stopLocationSharing);
+window.addEventListener('pageshow',()=>syncLocationSharing());
 
 function hostForWidget() {
   return document.querySelector('#topRight, .topRight, .headerLinks');
@@ -704,6 +744,7 @@ async function refreshStatus() {
   const status = await api('/api/field?view=status');
   if (!state.token || (document.getElementById('shiftsApp') && ticket !== shiftsTicket)) return;
   state.status = status;
+  syncLocationSharing();
   renderWidget();
   watchIncoming(state.status);
   ensureRealtime().catch(() => {});
@@ -712,7 +753,7 @@ async function refreshStatus() {
 function askConsent() {
   return new Promise(resolve => {
     const text = state.status?.notice?.text
-      || 'While you are clocked in, True North saves your location when you clock in, clock out, and mark a door. It does not track you in the background.';
+      || NOTICE_TEXT;
     const overlay = document.createElement('div');
     overlay.className = 'tnConsent';
     overlay.innerHTML = `
@@ -742,22 +783,23 @@ async function onClock() {
 }
 
 async function doClockIn() {
-  if (!state.status.consent) {
+  if (!state.status.consent || state.status.consent.notice_version !== NOTICE_VERSION) {
     const agreed = await askConsent();
     if (!agreed) return;
     setClockBusy('Clocking in…');
     const saved = await api('/api/field', { method: 'POST', body: { action: 'consent' } });
-    state.status.consent = saved.consent || { consented_at: new Date().toISOString() };
+    state.status.consent = saved.consent || { notice_version: NOTICE_VERSION, consented_at: new Date().toISOString() };
   }
   setClockBusy('Clocking in…');
   const loc = await geolocate();
-  if (!loc) toast('Clocked in without a location. Allow location so the next door can save a point.');
+  if (!loc) throw new Error('Allow location in your browser settings, then tap Clock In again.');
   setClockBusy('Clocking in…');
   const result = await api('/api/field', {
     method: 'POST',
     body: { action: 'clock-in', lat: loc?.lat ?? null, lng: loc?.lng ?? null, accuracy: loc?.accuracy ?? null }
   });
   state.status.openShift = result.shift;
+  syncLocationSharing();
   toast(loc ? 'Clocked in.' : 'Clocked in. No location this time.');
 }
 
@@ -771,6 +813,7 @@ async function doClockOut() {
     body: { action: 'clock-out', lat: loc?.lat ?? null, lng: loc?.lng ?? null, accuracy: loc?.accuracy ?? null }
   });
   state.status.openShift = null;
+  stopLocationSharing();
   toast('Clocked out.');
 }
 
@@ -937,6 +980,7 @@ function startWatchers() {
   clearInterval(state.ticker);
   state.poll = setInterval(() => {
     refreshStatus().catch(() => {});
+    if(document.getElementById('shiftsApp') && state.status?.isAdmin && state.shiftDate) loadShiftDay(state.shiftDate).catch(()=>{});
     if (state.msgOpen && state.chatMode === 'chat' && state.activeRepId) {
       loadThread(state.activeRepId, { quiet: true }).catch(() => {});
     }
@@ -1326,7 +1370,7 @@ function drawTrails() {
   state.trailLayer.clearLayers();
   const colors = ['#1e6bff', '#0c1424', '#2E6B4B', '#467c9e', '#A44835', '#A66B19', '#3E4E59'];
   const people = state.shifts?.people || [];
-  const visible = people.filter(person => person.rep.id === state.selectedRepId);
+  const visible = people.filter(person => state.selectedRepId ? person.rep.id === state.selectedRepId : person.shifts.some(shift=>shift.open));
   const bounds = [];
   visible.forEach((person, index) => {
     if (person.points.length < 1) return;
@@ -1336,6 +1380,8 @@ function drawTrails() {
     if (latLngs.length > 1) {
       L.polyline(latLngs, { color, weight: selected ? 5 : 3, opacity: selected ? 0.95 : 0.55 }).addTo(state.trailLayer);
     }
+    const latest=person.points.at(-1);
+    if(latest && person.shifts.some(shift=>shift.open)) L.marker([Number(latest.lat),Number(latest.lng)]).bindPopup(`<b>${esc(person.rep.name)}</b><br>Last location: ${esc(easternStamp(latest.captured_at))}<br>± ${esc(latest.accuracy_m ?? 'unknown')} m`).addTo(state.trailLayer);
     person.points.forEach(point => {
       const marker = L.circleMarker([Number(point.lat), Number(point.lng)], {
         radius: selected ? 7 : 5,
@@ -1354,7 +1400,7 @@ function drawTrails() {
   if (caption) {
     caption.textContent = selected
       ? `${selected.rep.name}: ${formatMiles(selected.miles)} across ${selected.points.length} point${selected.points.length === 1 ? '' : 's'}.`
-      : 'Select a person to highlight their trail.';
+      : 'Clocked-in team: latest saved locations. Select a person for their trail. Updates refresh every 15 seconds; timestamps show when each location was saved.';
   }
   scheduleShiftMapResize(60);
   if (bounds.length) state.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });

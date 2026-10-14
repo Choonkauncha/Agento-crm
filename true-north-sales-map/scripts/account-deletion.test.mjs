@@ -9,7 +9,7 @@ assert.equal(canManageAccount('manager','salesperson','delete'),false);
 assert.equal(canManageAccount('admin','admin','delete',{samePerson:true}),false);
 const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create role service_role;
-create schema auth; create table auth.users(id uuid primary key);
+create schema auth; create function auth.uid() returns uuid language sql as $$select null::uuid$$; create table auth.users(id uuid primary key);
 create table reps(id uuid primary key,user_id uuid references auth.users on delete cascade,name text, email text, role text, active boolean);
 create table account_audit(actor_rep_id uuid references reps on delete set null,target_rep_id uuid references reps on delete set null,action text,target_email text,metadata jsonb);
 create table impersonation_grants(user_id uuid); create table impersonation_sessions(user_id uuid);
@@ -52,5 +52,15 @@ async function request(role,targetRole,action='delete') {
 assert.equal((await request('admin','salesperson')).status,200);
 for(const [role,target] of [['admin','admin'],['manager','salesperson']]) { const result=await request(role,target); assert.equal(result.status,403); assert.equal(result.writes.length,0); }
 assert.equal((await request('manager','salesperson','archive')).status,403);
+await db.exec(`drop table blocking_fk; create table location_points(kind text); create table feature_permissions(role text,feature text,enabled boolean,primary key(role,feature));`);
+await db.exec(readFileSync(new URL('../supabase/migrations/20261014_live_location_and_accounts.sql',import.meta.url),'utf8'));
+await assert.rejects(db.query('select delete_account_permanently($1,$2)',[admin,other]),/Admin profiles/);
+await db.query('select delete_account_permanently($1,$2)',[admin,sales]);
+assert.equal((await db.query('select * from account_archive where id=$1',[sales])).rows.length,0);
+assert.equal((await db.query('select * from reps where id=$1',[sales])).rows.length,0);
+assert.equal((await db.query('select * from auth.users where id=$1',[sales])).rows.length,0);
+assert.equal((await db.query("select enabled from feature_permissions where role='appointment_setter' and feature='shifts'")).rows[0].enabled,true);
+await db.exec("insert into location_points values ('live')");
+await assert.rejects(db.exec("insert into location_points values ('invalid')"));
 await db.close();
 console.log('Account deletion: permissions, real SQL, archive history, retry and transaction rollback passed');

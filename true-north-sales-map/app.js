@@ -1860,7 +1860,23 @@ function reviseBuiltStops(){
   const byId=state.leadsById||new Map((state.leads||[]).map(lead=>[lead.id, lead]));
   const revised=reviseBuiltRoute(state.routeStops, state.selected, byId);
   if(!revised.stops.length){invalidateBuiltRoute();return;}
+  const oldStops=state.routeStops;
+  const remainingIds=oldStops.slice(state.navIndex).map(stop=>stop.id);
+  state.routeRequestSeq=(state.routeRequestSeq||0)+1;
   state.routeStops=revised.stops;
+  if(state.navigating){
+    const nextId=remainingIds.find(id=>state.routeStops.some(stop=>stop.id===id));
+    state.navIndex=nextId ? state.routeStops.findIndex(stop=>stop.id===nextId) : oldStops.slice(0,state.navIndex).filter(stop=>state.selected.has(stop.id)).length;
+    if(state.navIndex>=state.routeStops.length){endNavigation('No remaining stops.');}
+    else {
+      ++navLegToken;
+      state.navLegStop='';state.navPrompted='';state.navLine=null;state.navLegGeometry=null;state.navSteps=[];state.navStepIndex=-1;
+      clearNavLayers();showNavVisuals();
+      const here=state.navDisplay||state.currentLocation;
+      const next=state.routeStops[state.navIndex];
+      if(here){state.navLegStop=next.id;loadNavLeg(here,next);}
+    }
+  }
   state.routeGeometry=null;
   state.routeStale=true;
   state.routeBuildKey=routeBuildKey();
@@ -1936,7 +1952,7 @@ function renderRouteStops(){
   $('openGoogleRouteBtn').disabled=!state.routeStops.length;
   $('optimizeRouteBtn').hidden=!state.routeStops.length;
   $('routeStops').innerHTML=state.routeStops.map((l,i)=>`<div class="routeStop"><span>${i+1}</span><div><b>${esc(l.address)}</b><small>${esc(l.city)} · ${scoreLead(l)} pts</small></div><button type="button" aria-label="Remove ${esc(l.address || 'stop')} from route" data-route-lead="${esc(l.id)}">×</button></div>`).join('')||'<div class="empty">No route yet.</div>';
-  $('routeStops').querySelectorAll('[data-route-lead]').forEach(btn=>btn.onclick=()=>{state.selected.delete(btn.dataset.routeLead);updateSelectedBadge();refreshSelectedMarkers();renderWorkList();rememberRouteChange();});
+  $('routeStops').querySelectorAll('[data-route-lead]').forEach(btn=>btn.onclick=()=>{toggleSelected(btn.dataset.routeLead);renderWorkList();});
 }
 function openGoogleRouteBlocks(){
   if(!state.routeStops.length){alert('Optimize a route first.');return}
@@ -2569,6 +2585,10 @@ function ensureNavControls(){
     pause.textContent='Pause';
     actions.insertBefore(pause, $('navEnd'));
   }
+  if(actions&&!$('navEditRoute')){
+    const edit=document.createElement('button');edit.type='button';edit.id='navEditRoute';edit.textContent='Edit stops';
+    edit.onclick=()=>{pauseNavigation();openRouteFromChrome();};actions.insertBefore(edit,$('navEnd'));
+  }
   const shell=document.querySelector('.mapShell');
   if(shell&&!$('navCompass')){
     const compass=document.createElement('button');
@@ -2741,6 +2761,7 @@ function beginInAppNav(){
   state.navWatch=navigator.geolocation.watchPosition(onNavPosition, onNavError, {enableHighAccuracy:true, maximumAge:0, timeout:10000});
 }
 function endNavigation(message){
+  ++navLegToken;
   if(state.navWatch!=null&&navigator.geolocation)navigator.geolocation.clearWatch(state.navWatch);
   state.navWatch=null;state.navigating=false;state.navPaused=false;state.navLegGeometry=null;state.navLine=null;
   state.navUp=null;state.navGpsHeading=null;state.navCompass=null;
