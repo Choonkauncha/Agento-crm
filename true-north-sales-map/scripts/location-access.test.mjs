@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {requestLocation} from '../lib/location-access.js';
+const position={coords:{latitude:40,longitude:-82,accuracy:20}};
+let calls=[];
+const request=requestLocation({geo:{getCurrentPosition(ok,error,options){calls.push(options);ok(position);}}});
+assert.equal(calls.length,1,'request starts synchronously before awaiting');
+assert.equal(calls[0].timeout,25000);assert.deepEqual(await request,{lat:40,lng:-82,accuracy:20});
+calls=[];
+const fallback=await requestLocation({geo:{getCurrentPosition(ok,error,options){calls.push(options);if(options.enableHighAccuracy)error({code:3});else ok(position);}}});
+assert.equal(calls.length,2);assert.equal(calls[1].enableHighAccuracy,false);assert.equal(fallback.accuracy,20);
+calls=[];
+await assert.rejects(requestLocation({geo:{getCurrentPosition(ok,error,options){calls.push(options);error({code:1});}}}),/Safari Website Settings/);assert.equal(calls.length,1,'denied permission is not retried automatically');
+await assert.rejects(requestLocation({secure:false,geo:{}}),/HTTPS/);
+await assert.rejects(requestLocation({geo:null}),/unavailable/);
+await assert.rejects(requestLocation({geo:{getCurrentPosition(ok,error){error({code:2});}}}),/could not provide/);
+console.log('Location access: direct request, Safari GPS timeout, coarse fallback, denial, HTTPS and missing-device checks passed');

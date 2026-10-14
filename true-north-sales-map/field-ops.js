@@ -1,3 +1,4 @@
+import {requestLocation,locationAccessMessage} from './lib/location-access.js';
 import { createClient } from '/vendor/supabase/supabase.js';
 import './tn-files/password-reset.js';
 import { formatHours, formatMiles, incomingAlert, pointLabel, roleLabel, NOTICE_TEXT, NOTICE_VERSION } from './lib/field-rules.js';
@@ -265,26 +266,16 @@ async function api(path, { method = 'GET', body, retried = false } = {}) {
   return data;
 }
 
-// Obtain a fresh fix before starting a shift.
-function geolocate() {
-  if (!navigator.geolocation) return Promise.resolve(null);
-  return new Promise(resolve => {
-    navigator.geolocation.getCurrentPosition(
-      position => resolve({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
-      }),
-      () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
-    );
-  });
+// Start this request directly in the Clock In or consent-button gesture.
+function geolocate({required=false}={}) {
+  const pending=requestLocation();
+  return required?pending:pending.catch(()=>null);
 }
 
 function stopLocationSharing() {
   if(state.locationWatch !== null) navigator.geolocation?.clearWatch(state.locationWatch);
   clearInterval(state.locationTimer);state.locationTimer=null;state.locationGeneration=(state.locationGeneration||0)+1;
-  state.locationWatch=null;state.locationShift=null;state.locationSentAt=0;
+  state.locationWatch=null;state.locationShift=null;state.locationSentAt=0;state.locationLatest=null;state.locationSampling=false;
 }
 function syncLocationSharing() {
   const shift=state.status?.openShift;
@@ -315,16 +306,21 @@ function syncLocationSharing() {
     } finally {state.locationSending=false;}
   };
   state.locationWatch=navigator.geolocation.watchPosition(position=>{
+    if(generation!==state.locationGeneration)return;
+    state.locationLatest={position,receivedAt:Date.now()};
     if(!state.locationSentAt)sendPosition(position);
-  },()=>{
-    if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused. Allow location and keep this app open while on shift.');}
-  },{enableHighAccuracy:true,maximumAge:0,timeout:4500});
+  },error=>{
+    if(error?.code===1){stopLocationSharing();}
+    if(!state.locationWarned){state.locationWarned=true;toast(locationAccessMessage(error));}
+  },{enableHighAccuracy:true,maximumAge:5000,timeout:25000});
   state.locationTimer=setInterval(()=>{
     if(state.locationSampling||state.locationSending||generation!==state.locationGeneration)return;
+    if(state.locationLatest && Date.now()-state.locationLatest.receivedAt<=15000){sendPosition(state.locationLatest.position);return;}
     state.locationSampling=true;
     navigator.geolocation.getCurrentPosition(position=>{
-      state.locationSampling=false;sendPosition(position);
-    },()=>{state.locationSampling=false;},{enableHighAccuracy:true,maximumAge:0,timeout:4500});
+      if(generation!==state.locationGeneration)return;
+      state.locationSampling=false;state.locationLatest={position,receivedAt:Date.now()};sendPosition(position);
+    },()=>{if(generation===state.locationGeneration)state.locationSampling=false;},{enableHighAccuracy:false,maximumAge:5000,timeout:15000});
   },5000);
 }
 window.addEventListener('pagehide',stopLocationSharing);
@@ -768,7 +764,7 @@ async function refreshStatus() {
   ensureRealtime().catch(() => {});
 }
 
-function askConsent() {
+function askConsent({requestLocation=false}={}) {
   return new Promise(resolve => {
     const text = state.status?.notice?.text
       || NOTICE_TEXT;
@@ -782,7 +778,11 @@ function askConsent() {
       </div>`;
     document.body.appendChild(overlay);
     const yes = overlay.querySelector('#tnConsentYes');
-    yes.onclick = () => { overlay.remove(); resolve(true); };
+    yes.onclick = () => {
+      const location=requestLocation?geolocate({required:true}):null;
+      location?.catch(()=>{});
+      overlay.remove();resolve(requestLocation?{agreed:true,location}:true);
+    };
     yes.focus();
   });
 }
@@ -801,16 +801,17 @@ async function onClock() {
 }
 
 async function doClockIn() {
+  let location;
   if (!state.status.consent || state.status.consent.notice_version !== NOTICE_VERSION) {
-    const agreed = await askConsent();
-    if (!agreed) return;
+    const choice = await askConsent({requestLocation:true});
+    if (!choice?.agreed) return;
+    location=choice.location;
     setClockBusy('Clocking in…');
     const saved = await api('/api/field', { method: 'POST', body: { action: 'consent' } });
     state.status.consent = saved.consent || { notice_version: NOTICE_VERSION, consented_at: new Date().toISOString() };
-  }
-  setClockBusy('Clocking in…');
-  const loc = await geolocate();
-  if (!loc) throw new Error('Allow location in your browser settings, then tap Clock In again.');
+  }else{location=geolocate({required:true});}
+  setClockBusy('Getting your location…');
+  const loc = await location;
   setClockBusy('Clocking in…');
   const result = await api('/api/field', {
     method: 'POST',
