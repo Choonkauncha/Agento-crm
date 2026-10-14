@@ -20,6 +20,7 @@ const state = {
   clockBusy: false,
   locationWarned: false,
   consentBusy: false,
+  locationTimer: null,locationSampling:false,locationGeneration:0,locationPoll:null,
   locationWatch: null, locationShift: null, locationSentAt: 0, locationSending: false,
   poll: null,
   ticker: null,
@@ -282,6 +283,7 @@ function geolocate() {
 
 function stopLocationSharing() {
   if(state.locationWatch !== null) navigator.geolocation?.clearWatch(state.locationWatch);
+  clearInterval(state.locationTimer);state.locationTimer=null;state.locationGeneration=(state.locationGeneration||0)+1;
   state.locationWatch=null;state.locationShift=null;state.locationSentAt=0;
 }
 function syncLocationSharing() {
@@ -300,8 +302,9 @@ function syncLocationSharing() {
   }
   if(state.locationShift===shift.id || !navigator.geolocation) return;
   stopLocationSharing();state.locationShift=shift.id;
-  state.locationWatch=navigator.geolocation.watchPosition(async position=>{
-    if(!state.token || state.status?.openShift?.id!==shift.id || state.locationSending || Date.now()-state.locationSentAt<30000) return;
+  const generation=state.locationGeneration;
+  const sendPosition=async position=>{
+    if(!state.token || state.status?.openShift?.id!==shift.id || state.locationSending || generation!==state.locationGeneration) return;
     state.locationSending=true;
     try {
       await api('/api/field',{method:'POST',body:{action:'location',shiftId:shift.id,lat:position.coords.latitude,lng:position.coords.longitude,accuracy:position.coords.accuracy}});
@@ -310,9 +313,19 @@ function syncLocationSharing() {
       if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused: '+error.message);}
       if(error.status===409) stopLocationSharing();
     } finally {state.locationSending=false;}
+  };
+  state.locationWatch=navigator.geolocation.watchPosition(position=>{
+    if(!state.locationSentAt)sendPosition(position);
   },()=>{
     if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused. Allow location and keep this app open while on shift.');}
-  },{enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+  },{enableHighAccuracy:true,maximumAge:0,timeout:4500});
+  state.locationTimer=setInterval(()=>{
+    if(state.locationSampling||state.locationSending||generation!==state.locationGeneration)return;
+    state.locationSampling=true;
+    navigator.geolocation.getCurrentPosition(position=>{
+      state.locationSampling=false;sendPosition(position);
+    },()=>{state.locationSampling=false;},{enableHighAccuracy:true,maximumAge:0,timeout:4500});
+  },5000);
 }
 window.addEventListener('pagehide',stopLocationSharing);
 window.addEventListener('pageshow',()=>syncLocationSharing());
@@ -982,14 +995,15 @@ async function sendCurrent(event) {
 
 function startWatchers() {
   clearInterval(state.poll);
+  clearInterval(state.locationPoll);
   clearInterval(state.ticker);
   state.poll = setInterval(() => {
     refreshStatus().catch(() => {});
-    if(document.getElementById('shiftsApp') && state.status?.isAdmin && state.shiftDate) loadShiftDay(state.shiftDate,{quiet:true}).catch(()=>{});
     if (state.msgOpen && state.chatMode === 'chat' && state.activeRepId) {
       loadThread(state.activeRepId, { quiet: true }).catch(() => {});
     }
   }, 15000);
+  state.locationPoll=setInterval(()=>{if(document.getElementById('shiftsApp')&&state.status?.isAdmin&&state.shiftDate)loadShiftDay(state.shiftDate,{quiet:true}).catch(()=>{});},5000);
   state.ticker = setInterval(renderClockLabel, 1000);
 }
 
@@ -1154,6 +1168,7 @@ async function bootShifts() {
     shiftsTicket += 1;
     shiftDayLoader.invalidate();
     clearInterval(state.poll);
+  clearInterval(state.locationPoll);
     clearInterval(state.ticker);
     stopAlerts();
     document.documentElement.classList.add('tn-signed-out', 'tn-hold-login');
@@ -1200,6 +1215,7 @@ async function enterShifts(session) {
   shiftDayLoader.invalidate();
   destroyShiftMap();
   clearInterval(state.poll);
+  clearInterval(state.locationPoll);
   clearInterval(state.ticker);
   state.shifts = null;
   state.status = null;
@@ -1447,7 +1463,7 @@ function drawTrails({fit=true}={}) {
   if (caption) {
     caption.textContent = selected
       ? `${selected.rep.name}: ${formatMiles(selected.miles)} across ${selected.points.length} point${selected.points.length === 1 ? '' : 's'}.`
-      : 'Clocked-in team: latest saved locations. Select a person for their trail. Updates refresh every 15 seconds; timestamps show when each location was saved.';
+      : 'Clocked-in team: latest saved locations. Select a person for their trail. Locations update silently every 5 seconds; timestamps show when each location was saved.';
   }
   scheduleShiftMapResize(60);
   if (fit && bounds.length) state.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });

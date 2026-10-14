@@ -3,7 +3,7 @@
 export const FIELD_ROLES = Object.freeze(['appointment_setter', 'canvasser', 'salesperson']);
 export const ADMIN_ROLES = Object.freeze(['admin', 'manager']);
 export const NOTICE_VERSION = '2026-10-14';
-export const NOTICE_TEXT = 'While you are clocked in, True North shares your location with management and saves updates about every 30 seconds while this app is running, as well as clock-in, clock-out, and door points. Sharing stops when you clock out or sign out. Your browser will request location permission. Keep the app open for current updates; your phone may pause updates when it is locked or the app is in the background.';
+export const NOTICE_TEXT = 'While you are clocked in, True North shares your location with management and saves updates about every 5 seconds while this app is running, as well as clock-in, clock-out, and door points. Sharing stops when you clock out or sign out. Your browser will request location permission. Keep the app open for current updates; your phone may pause updates when it is locked or the app is in the background.';
 export const EASTERN_TZ = 'America/New_York';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

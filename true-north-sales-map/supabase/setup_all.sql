@@ -3440,7 +3440,7 @@ begin
   new.rep_id := public.current_rep_id();
   new.consented_at := now();
   new.notice_version := '2026-10-14';
-  new.notice_text := $notice$While you are clocked in, True North shares your location with management and saves updates about every 30 seconds while this app is running, as well as clock-in, clock-out, and door points. Sharing stops when you clock out or sign out. Your browser will request location permission. Keep the app open for current updates; your phone may pause updates when it is locked or the app is in the background.$notice$;
+  new.notice_text := $notice$While you are clocked in, True North shares your location with management and saves updates about every 5 seconds while this app is running, as well as clock-in, clock-out, and door points. Sharing stops when you clock out or sign out. Your browser will request location permission. Keep the app open for current updates; your phone may pause updates when it is locked or the app is in the background.$notice$;
   return new;
 end;
 $$;
