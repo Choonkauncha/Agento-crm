@@ -457,3 +457,5 @@ html.isNavPaused .navCompass{display:none}
 .repReceiptBar{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
 .myReceiptList{display:flex;flex-direction:column;gap:8px}
 .receiptRow{border:1px solid #d5dee4;border-radius:10px;padding:10px;font-size:13px;line-height:1.35}
+
+.addressActions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.addressActions button{min-height:44px;padding:10px 12px;border:1px solid #8397af;border-radius:8px;background:#fff;color:#14223a;font-weight:700;cursor:pointer}.addressActions button[aria-pressed="true"]{background:#173f6a;color:white}.addressActions button[data-groupme-lead]{background:#1767c9;color:white;flex-basis:100%}.addressActions button:focus-visible{outline:3px solid #e3a93e;outline-offset:2px}

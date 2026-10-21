@@ -1,3 +1,4 @@
+import { appointmentAudience, messageAudience } from './lib/scheduling.js';
 import {requestLocation,locationAccessMessage} from './lib/location-access.js';
 import { createClient } from '/vendor/supabase/supabase.js';
 import './tn-files/password-reset.js';
@@ -26,6 +27,8 @@ const state = {
   poll: null,
   ticker: null,
   channel: null,
+  appointmentVersions: new Map(),
+  appointmentsPrimed: false,
   alertsPrimed: false,
   seenMessageIds: new Set(),
   alertsUnlocked: false,
@@ -125,6 +128,7 @@ function announceMessage(text) {
 }
 
 function noteIncoming(message) {
+  if (!messageAudience(state.status, message)) return;
   const viewing = state.msgOpen && state.chatMode === 'chat' && state.thread?.id === message?.thread_id
     ? state.thread.id
     : null;
@@ -144,6 +148,17 @@ function noteIncoming(message) {
 }
 
 function watchIncoming(status) {
+  const next = new Map();
+  for (const appointment of status?.appointments || []) {
+    if (!appointmentAudience(status.rep, appointment)) continue;
+    const version = `${appointment.updated_at}|${appointment.stage}|${appointment.scheduled_at}|${appointment.salesperson_id}`;
+    next.set(appointment.id, version);
+    if (state.appointmentsPrimed && state.appointmentVersions.get(appointment.id) !== version) {
+      announceMessage(`Inspection ${appointment.stage}: ${easternStamp(appointment.scheduled_at)}`);
+    }
+  }
+  state.appointmentVersions = next;
+  state.appointmentsPrimed = true;
   const incoming = status?.latestIncoming;
   if (!state.alertsPrimed) {
     state.alertsPrimed = true;
@@ -156,6 +171,8 @@ function watchIncoming(status) {
 function stopAlerts() {
   stopLocationSharing();
   state.alertsPrimed = false;
+  state.appointmentsPrimed = false;
+  state.appointmentVersions.clear();
   state.seenMessageIds.clear();
   if (state.channel && state.sb) state.sb.removeChannel(state.channel);
   state.channel = null;
@@ -177,8 +194,7 @@ async function ensureRealtime() {
     }
     state.channel = state.sb.channel(`tn-messages-${state.status?.rep?.id || 'office'}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        if (payload?.new) noteIncoming(payload.new);
-        refreshStatus().catch(() => {});
+        refreshStatus().then(() => { if(payload?.new)noteIncoming(payload.new); }).catch(() => {});
       })
       .subscribe();
   } catch (error) {
@@ -786,8 +802,9 @@ function widgetStatusKey(status){
 async function refreshStatus() {
   if (!state.token) return;
   const ticket = shiftsTicket;
+  const expectedToken=state.token;
   const status = await api('/api/field?view=status');
-  if (!state.token || (document.getElementById('shiftsApp') && ticket !== shiftsTicket)) return;
+  if (!state.token || state.token!==expectedToken || (document.getElementById('shiftsApp') && ticket !== shiftsTicket)) return;
   const before=widgetStatusKey(state.status);
   state.status = status;
   syncLocationSharing();
@@ -1058,6 +1075,7 @@ function readStoredSession() {
 }
 
 async function syncSession(session) {
+  if (state.sessionUserId !== session?.user?.id) {stopAlerts();state.sessionUserId=session?.user?.id;state.status=null;}
   state.token = session?.access_token || null;
   if (!session) {
     state.status = null;

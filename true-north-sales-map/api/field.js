@@ -1,3 +1,4 @@
+import { appointmentAudience } from '../lib/scheduling.js';
 import { requirePasswordReady } from '../lib/server-access.js';
 import { requireFeature } from '../lib/features.js';
 import {
@@ -181,8 +182,24 @@ async function viewStatus(ctx) {
     openShift: shift,
     unread,
     threadId,
-    latestIncoming
+    latestIncoming,
+    appointments: await appointmentAlerts(ctx)
   };
+}
+
+async function appointmentAlerts(ctx) {
+  // Feature-disabled users receive no appointment data or alerts.
+  try { await requireFeature(ctx.request, 'intake'); } catch (error) { if(error.status===403)return [];throw error; }
+  const admin = isAdminRole(ctx.rep.role);
+  const field = ctx.rep.role === 'salesperson' ? 'salesperson_id' : 'canvasser_id';
+  const filter = admin ? '' : `&${field}=eq.${ctx.rep.id}`;
+  const rows = await rest(ctx.token, `appointments?select=id,canvasser_id,salesperson_id,scheduled_at,stage,updated_at&order=updated_at.desc&limit=100${filter}`);
+  return (rows || []).filter(row => appointmentAudience(ctx.rep, row));
+}
+
+async function schedulingSettings(ctx) {
+  const rows = await rest(ctx.token, 'field_settings?id=eq.team&select=groupme_url&limit=1');
+  return { groupme_url: rows?.[0]?.groupme_url || '' };
 }
 
 async function adminUnreadTotal(ctx) {
@@ -405,6 +422,7 @@ async function markRead(ctx, body) {
 
 async function handleGet(ctx, url) {
   const view = url.searchParams.get('view') || 'status';
+  if(view==='settings'){await requireFeature(ctx.request,'intake');return schedulingSettings(ctx);}
   if(view!=='status')await requireFeature(ctx.request,view==='shifts'?'shifts':'messages');
   if (view === 'status') return viewStatus(ctx);
   if (view === 'inbox') return viewInbox(ctx);
