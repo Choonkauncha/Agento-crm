@@ -7,3 +7,22 @@
 .mapAssistant.orbPanelBelow .mapAssistantPanel{top:calc(100% + 10px);bottom:auto}
 .mapAssistantLauncher{touch-action:none;cursor:grab;background:radial-gradient(circle at 35% 28%,#102d45cc,#03121bcc)}
 .mapAssistantLauncher:active{cursor:grabbing}
+
+/* The launcher is the mesh itself, with audio-driven light rather than a static icon. */
+.mapAssistantLauncher{width:76px;height:76px;padding:0;border:0!important;background:radial-gradient(circle,#09253844,transparent 70%)!important;box-shadow:none!important;overflow:visible;isolation:isolate}
+.mapAssistantLauncher::before{content:"";position:absolute;inset:17%;border-radius:50%;background:#20cff4;filter:blur(16px);opacity:calc(.1 + var(--orb-energy,0)*.5);z-index:-1}
+.mapAssistantLauncher canvas{width:100%;height:100%;border-radius:50%;filter:drop-shadow(0 0 5px #36c9f34d)}
+.mapAssistantLiveDot{display:none;position:absolute;width:7px;height:7px;background:#4ce4b4;border:2px solid #07182c;border-radius:50%;right:10px;bottom:9px}
+.mapAssistantLauncher[data-voice-state=listening] .mapAssistantLiveDot,.mapAssistantLauncher[data-voice-state=speaking] .mapAssistantLiveDot{display:block}
+.mapAssistantLauncher[data-voice-state=working]{filter:drop-shadow(0 0 7px #529cff)}
+.mapAssistantPanel{box-sizing:border-box;width:min(352px,calc(100vw - 24px));padding:18px;background:#0c1c30;color:#edf7ff;border:1px solid #395369;border-radius:20px;box-shadow:0 16px 54px #0007;max-height:70dvh;overflow:auto}
+.mapAssistantPanel header{padding-bottom:10px;align-items:flex-start}.mapAssistantPanel header b{display:block;font-size:20px;letter-spacing:-.4px}.mapAssistantPanel header button{color:#c6deef;min-width:40px;min-height:40px;line-height:1}
+.mapAssistantEyebrow{font-size:10px;letter-spacing:1.5px;color:#89b4ce;display:block;font-weight:700}.mapAssistantPanel>p{color:#b6cedf;font-size:13px}.mapAssistantPresence{display:flex;align-items:center;gap:8px;color:#a9e8ed;font-size:12px;min-height:30px}.mapAssistantPresence i{width:6px;height:6px;border-radius:50%;background:#69cfdc;flex:none}
+.mapAssistantActions button,.mapAssistantCommands button{box-sizing:border-box;min-height:44px;border:1px solid #35506a;border-radius:10px;background:#162d45;color:#e6f5ff;padding:10px;font:inherit;font-size:13px;cursor:pointer}
+.mapAssistantActions [data-start]{flex:1;background:#45d3e6;color:#09213b;border-color:#45d3e6;font-weight:750}.mapAssistantCommands{display:grid;grid-template-columns:1fr 1fr;gap:8px}.mapAssistantCommands button:hover{background:#254763}.mapAssistantCommands [data-command=clear_route]{color:#f5bcb6}
+.mapAssistantPanel button:disabled{opacity:.45;cursor:wait}.mapAssistantPanel button[hidden]{display:none}.mapAssistantPanel button:focus-visible{outline:2px solid #65e6ff;outline-offset:3px}.mapAssistantResult{border:1px solid #31516a;background:#102a40;border-radius:10px;padding:12px;font-size:13px;color:#c9f4ed;margin-top:14px}.mapAssistantResult[data-result=error]{color:#ffd0c9;background:#3c242c}.mapAssistantPanel .mapAssistantDisclosure{font-size:10px;color:#8da9bd;line-height:1.5;margin-bottom:0}.mapAssistantCaption{font-size:12px;max-height:60px;overflow:auto;color:#a9bfce}.mapAssistantResult a{color:#7ce5f4}
+@media(max-width:700px){.mapAssistantLauncher{width:64px;height:64px}.mapAssistantPanel{max-height:65dvh}.sheet-open .mapAssistantPanel{max-height:55dvh}}
+@media(prefers-reduced-motion:reduce){.mapAssistantLauncher canvas{filter:none}}
+body .mapAssistantPanel>p{color:#b6cedf;font-size:13px;line-height:1.5}
+body .mapAssistantPanel .mapAssistantEyebrow{font-size:10px;color:#89b4ce;letter-spacing:1.5px}
+body .mapAssistantPanel .mapAssistantDisclosure{font-size:10px;color:#8da9bd;line-height:1.5}

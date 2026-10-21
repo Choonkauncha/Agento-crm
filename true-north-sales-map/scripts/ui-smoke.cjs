@@ -198,7 +198,8 @@ const server = http.createServer(async (req, res) => {
     if(req.method==='POST'&&coachPostGate)await coachPostGate;
     if(req.method==='GET'&&coachGetGate)await coachGetGate;
     if(req.method==='POST'&&failNextCoachPost){failNextCoachPost=false;return send(res,{error:'Synthetic Coach reply failed. Your draft is retained.'},503);}
-    const reply = await coachApi.handleCoach(request, {
+    const actionHandler=req.method==='POST'&&JSON.parse(body||'{}').workspace==='map'?coachApi.handleVoiceAction:coachApi.handleCoach;
+    const reply = await actionHandler(request, {
       env:{SUPABASE_URL:origin,SUPABASE_PUBLISHABLE_KEY:'preview-only',AI_GATEWAY_MODEL:'test/fixture-only',AI_GATEWAY_API_KEY:'test-not-a-key'},
       now, limiter:coachLimiterFixture,
       generateImpl:async options => {
@@ -213,7 +214,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/api/live-token') {
     liveTokenCalls += 1;
-    return send(res, { token: 'synthetic-live-token', model: 'gemini-3.8-live', voice: 'Kore', expiresAt: new Date(Date.now() + 1800000).toISOString(), systemInstruction: 'You are the positive True North Live Coach.' });
+    const {toolDefinitions}=await import(path.join(root,'lib/voice-tools.js'));
+    return send(res, {tools:toolDefinitions(role,{map:true}), token: 'synthetic-live-token', model: 'gemini-3.8-live', voice: 'Kore', expiresAt: new Date(Date.now() + 1800000).toISOString(), systemInstruction: 'You are the positive True North Live Coach.' });
   }
   if (url.pathname === "/data/leads.json") return send(res, db.leads);
   if (url.pathname === "/data/manifest.json") return send(res, {totalRecords:db.leads.length,preview:true});
@@ -386,9 +388,10 @@ const server = http.createServer(async (req, res) => {
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
       ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
       : {}),
-    args: process.env.PLAYWRIGHT_CHROMIUM_ARGS
-      ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS)
-      : [],
+    args: [
+      ...(process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : []),
+      ...(process.env.UI_ASSISTANT ? ['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'] : [])
+    ],
   });
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1050 },
@@ -512,6 +515,76 @@ const server = http.createServer(async (req, res) => {
     localStorage.setItem("sb-127-auth-token", JSON.stringify(s));
     localStorage.setItem("tn-role:" + s.user.id, "admin");
   }, session());
+  if(process.env.UI_ASSISTANT){
+    page.setDefaultTimeout(20000);
+    await context.grantPermissions(['microphone','geolocation']);
+    await context.setGeolocation({latitude:40.39,longitude:-82.48});
+    await page.addInitScript(()=>{
+      const NativeSocket=window.WebSocket;
+      class LiveSocket{
+        static OPEN=1;
+        constructor(url){
+          if(!String(url).includes('BidiGenerateContentConstrained'))return new NativeSocket(url);
+          this.readyState=0;this.sent=[];window.testLive=this;
+          setTimeout(()=>{this.readyState=1;this.onopen?.();},0);
+        }
+        send(raw){const data=JSON.parse(raw);this.sent.push(data);if(data.setup)setTimeout(()=>this.receive({setupComplete:{}}),0);}
+        receive(data){this.onmessage?.({data:JSON.stringify(data)});}
+        close(){this.readyState=3;this.onclose?.({code:1000});}
+      }
+      window.WebSocket=LiveSocket;
+    });
+    role='appointment_setter';await page.goto(origin+'/');
+    await page.waitForFunction(()=>window.__tnRoute?.pinPoint('TEST-0'));
+    if(await page.locator('#postSignInContinue').isVisible())await page.locator('#postSignInContinue').click();
+    await page.locator('#mapLoader').waitFor({state:'hidden'});
+    await page.waitForFunction(()=>!document.querySelector('#tnMapAssistant [data-start]')?.disabled);
+    await page.locator('#tnMapAssistant .mapAssistantLauncher').click();
+    await page.locator('#tnMapAssistant [data-command="build_route"]').click();
+    await page.waitForFunction(()=>window.__tnRoute.stops().length>0);
+    await page.locator('#tnMapAssistant [data-result]').filter({hasText:'route built'}).waitFor();
+    const built=await page.evaluate(()=>window.__tnRoute.stops().length);assert.equal(built,20);
+    await page.locator('#tnMapAssistant [data-command="clear_route"]').click();
+    await page.waitForFunction(()=>window.__tnRoute.stops().length===0&&window.__tnRoute.selected().length===0);
+    await page.locator('#tnMapAssistant [data-result]').filter({hasText:'Route cleared'}).waitFor();
+    await page.locator('#tnMapAssistant [data-start]').click();
+    await page.waitForFunction(()=>document.querySelector('#tnMapAssistant [data-status]').textContent.includes('Listening'));
+    assert.ok(await page.evaluate(()=>testLive.sent.find(s=>s.setup).setup.tools[0].functionDeclarations.some(t=>t.name==='clear_route')));
+    await page.evaluate(()=>testLive.receive({toolCall:{functionCalls:[{id:'voice-build-1',name:'build_route',args:{count:8}}]}}));
+    await page.waitForFunction(()=>testLive.sent.some(s=>s.toolResponse?.functionResponses?.some(r=>r.id==='voice-build-1'&&r.response.executed===true)));
+    assert.equal(await page.evaluate(()=>window.__tnRoute.stops().length),8);
+    const before=coachCalls.filter(c=>c.body?.toolCall?.name==='build_route').length;
+    await page.evaluate(()=>testLive.receive({toolCall:{functionCalls:[{id:'voice-build-1',name:'build_route',args:{count:8}}]}}));
+    await page.waitForFunction(()=>testLive.sent.filter(s=>s.toolResponse?.functionResponses?.some(r=>r.id==='voice-build-1')).length===2);
+    assert.equal(coachCalls.filter(c=>c.body?.toolCall?.name==='build_route').length,before,'duplicate Live tool IDs do not run twice');
+    const renderer=await page.locator('#tnMapAssistant .mapAssistantLauncher').getAttribute('data-orb-renderer');assert.ok(['webgl','software-3d'].includes(renderer));
+    await page.evaluate(()=>testLive.receive({toolCall:{functionCalls:[{id:'voice-clear-1',name:'clear_route',args:{}}]}}));
+    await page.waitForFunction(()=>testLive.sent.some(s=>s.toolResponse?.functionResponses?.some(r=>r.id==='voice-clear-1'&&r.response.status==='cleared')));
+    assert.equal(await page.evaluate(()=>window.__tnRoute.stops().length),0);
+    await page.locator('#tnMapAssistant [data-end]').click();
+    await page.screenshot({path:path.join(artifacts,'assistant-mesh-desktop.png'),timeout:45000});
+    await page.setViewportSize({width:390,height:844});
+    await page.waitForTimeout(300);await page.screenshot({path:path.join(artifacts,'assistant-mesh-mobile.png')});
+    assert.ok(await page.evaluate(()=>{const r=document.querySelector('.mapAssistantPanel').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;}),'assistant panel fits mobile');
+    // Software renderer must remain a real projected mesh when WebGL is unavailable.
+    const fallback=await context.newPage();fallback.setDefaultTimeout(20000);
+    fallback.on('pageerror',error=>{errors.push(error.message);console.log('FALLBACK ERROR',error.message);});
+    await fallback.addInitScript(()=>{const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'?null:get.call(this,type,...args);};});
+    console.log('Checking software mesh');
+    await fallback.goto(origin+'/');
+    await fallback.bringToFront();
+    await fallback.waitForFunction(()=>document.querySelector('#tnMapAssistant [data-orb-renderer="software-3d"]'));
+    await fallback.waitForFunction(()=>{const canvas=document.querySelector('#tnMapAssistant canvas');if(!canvas)return false;const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=3;i<data.length;i+=4)if(data[i])count++;return count>200;}).catch(async error=>{console.log('Fallback state',await fallback.evaluate(()=>{const c=document.querySelector('#tnMapAssistant canvas');return {hidden:document.hidden,renderer:c?.parentElement.dataset.orbRenderer,rect:c?.getBoundingClientRect().toJSON(),size:c?[c.width,c.height]:null};}));throw error;});
+    const meshPixels=await fallback.evaluate(()=>{const canvas=document.querySelector('#tnMapAssistant canvas');const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let pixels=0;for(let i=3;i<data.length;i+=4)if(data[i]>0)pixels++;return pixels;});
+    assert.ok(meshPixels>200,'software fallback actually draws mesh pixels');
+    const levels=await fallback.evaluate(async()=>{
+      const {mountCoachOrb}=await import('/tn-files/coach-orb.js');const stage=document.createElement('div');stage.className='tnCoachOrbStage';stage.style.cssText='width:120px;height:120px;position:fixed;top:20px;left:20px';const canvas=document.createElement('canvas');canvas.style.cssText='width:120px;height:120px';stage.append(canvas);document.body.append(stage);const orb=mountCoachOrb(canvas);orb.setState('listening');orb.setLevels({input:.9,output:0});await new Promise(r=>setTimeout(r,70));const loud=Number(stage.style.getPropertyValue('--orb-energy'));orb.setLevels({input:0,output:0});await new Promise(r=>setTimeout(r,400));const quiet=Number(stage.style.getPropertyValue('--orb-energy'));orb.dispose();stage.remove();return {loud,quiet};
+    });
+    assert.ok(levels.loud>.2&&levels.quiet<levels.loud/2,'mesh responds to measured level changes and returns to quiet');
+    assert.deepEqual(errors,[]);
+    console.log('Assistant browser flow passed: button/voice build and clear, duplicate tool IDs, authenticated action gateway, mobile fit, GPU/software mesh, audio response');
+    await browser.close();server.close();return;
+  }
   if (process.env.UI_SCHEDULING) {
     page.setDefaultTimeout(20000);
     role='appointment_setter';

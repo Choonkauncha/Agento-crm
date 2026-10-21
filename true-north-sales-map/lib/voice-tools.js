@@ -6,6 +6,8 @@ export function normalizeToolCall(call){if(call?.name==='draft_route')return {ac
 
 export const MAP_TOOLS=[
  {name:'get_live_context',description:'Read fresh personal work context and the current map, selected addresses and built route. Call before answering questions about the user or current route.',parameters:{type:'OBJECT',properties:{}}},
+ {name:'build_route',description:'Actually build and optimize the selected houses. With no selection, choose nearby mapped houses from the current filters (default 20). Use this for build my route without a time budget. Never say it is built before the result.',parameters:{type:'OBJECT',properties:{count:{type:'NUMBER',description:'Optional maximum houses, integer 1–80'},mode:{type:'STRING',enum:['driving','walking']}}}},
+ {name:'clear_route',description:'Clear the current route and selected houses when the user explicitly asks to clear/reset the route. Ends active navigation. Does not delete addresses or employee saved routes.',parameters:{type:'OBJECT',properties:{}}},
  {name:'build_timed_route',description:'Build a route approximately matching total work time (travel plus visits). Uses selected homes, otherwise filtered map homes. Replaces the route only when not navigating. Default five minutes per house. Report actual returned estimate, never guarantee exact duration.',parameters:{type:'OBJECT',properties:{minutes:{type:'NUMBER',description:'Total work minutes, 15–480'},stop_minutes:{type:'NUMBER',description:'Minutes at each house, 1–60, default 5'},mode:{type:'STRING',enum:['driving','walking']}},required:['minutes']}},
  {name:'remove_route_stop',description:'Remove a specific address or stop ID from the current route, including during navigation. Read live context to find the exact address first.',parameters:{type:'OBJECT',properties:{stop:{type:'STRING'}},required:['stop']}},
  {name:'route_navigation',description:'Start, pause, resume or end in-app route navigation when asked.',parameters:{type:'OBJECT',properties:{action:{type:'STRING',enum:['start','pause','resume','end']}},required:['action']}},
@@ -14,7 +16,13 @@ export const MAP_TOOLS=[
 ];
 export function validateMapTool(call){
  const name=call?.name,args=call?.args||{};
+ if(typeof args!=='object'||Array.isArray(args))throw Error('Command arguments must be an object.');
  if(!MAP_TOOLS.some(tool=>tool.name===name))throw Error('Map command is not allowed.');
+ if(name==='build_route'){
+  if(args.count!==undefined&&(!Number.isInteger(args.count)||args.count<1||args.count>80))throw Error('Choose between 1 and 80 houses.');
+  if(args.mode!==undefined&&!['driving','walking'].includes(args.mode))throw Error('Invalid travel mode.');
+  return {name,args:{...(args.count===undefined?{}:{count:args.count}),...(args.mode===undefined?{}:{mode:args.mode})}};
+ }
  if(name==='build_timed_route'){
   if(typeof args.minutes!=='number'||!Number.isFinite(args.minutes)||args.minutes<15||args.minutes>480)throw Error('Route minutes must be 15–480.');
   const stop_minutes=args.stop_minutes??5;

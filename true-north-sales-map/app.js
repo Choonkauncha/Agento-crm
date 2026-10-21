@@ -3342,7 +3342,7 @@ function renderAssignedRouteList(){
   el.querySelectorAll('[data-route-delete]').forEach(btn=>{btn.onclick=()=>deleteAssignedRoute(btn.dataset.routeDelete);});
 }
 function mapAssistantContext(){
-  return {updatedAt:new Date().toISOString(),travelMode:state.routeMode,visibleAddressCount:state.filtered.length,
+  return {updatedAt:new Date().toISOString(),ready:state.cloudReady,readOnly:state.routeViewOnly,editingEmployeeRoute:Boolean(state.routeFor),paused:state.navPaused,travelMode:state.routeMode,visibleAddressCount:state.filtered.length,
     selectedCount:state.selected.size,navigating:state.navigating,currentStop:state.routeStops[state.navIndex]?.address||null,
     route:state.routeStops.map(lead=>({id:lead.id,address:addressOf(lead)})),
     visibleAreas:[...new Set(state.filtered.map(lead=>lead.city).filter(Boolean))].slice(0,40),
@@ -3351,6 +3351,32 @@ function mapAssistantContext(){
 async function executeMapAssistantAction(name,args){
   if(!state.sessionReady||state.mode!=='cloud')throw Error('Sign in again.');
   if(window.tnFeatureAllowed?.('routes')===false)throw Error('Routes are disabled for your role.');
+  if(!state.cloudReady)throw Error('The map is still loading. Try again in a moment.');
+  if(state.routeViewOnly||state.routeFor)throw Error('Close the employee route before changing your own route with the assistant.');
+  if(state.routeBuilding)throw Error('A route is already being built. Wait until it finishes.');
+  if(name==='clear_route'){
+    const removed=state.selected.size;clearRoute();
+    state.routeBuildKey='';state.routeDurationSeconds=0;publishRouteState();
+    return {status:'cleared',executed:true,removed,stops:0,selectedCount:0,navigating:false};
+  }
+  if(name==='build_route'){
+    if(state.navigating)throw Error('End navigation before replacing its route.');
+    const actor=state.user?.id;
+    const pool=(state.selected.size?[...state.selected].map(id=>state.leadsById.get(id)):state.filtered).filter(lead=>lead&&isCoords(lead));
+    if(!pool.length)throw Error('No mapped houses are available. Change the map filters or select houses first.');
+    const count=Math.min(args.count??(state.selected.size||20),ROUTE_STOP_LIMIT);
+    const origin=state.currentLocation||pool[0];
+    const stops=state.selected.size?pool.slice(0,count):pool.map(lead=>({lead,distance:haversine(origin.lat,origin.lng,lead.lat,lead.lng)})).sort((a,b)=>a.distance-b.distance).slice(0,count).map(item=>item.lead);
+    setRouteMode(args.mode||state.routeMode);
+    state.selected=new Set(stops.map(lead=>lead.id));
+    $('routeCount').value=Math.max(5,stops.length);$('routeCountValue').textContent=$('routeCount').value;
+    updateSelectedBadge();refreshSelectedMarkers();renderWorkList();
+    await optimizeAndDrawRoute();
+    if(!state.sessionReady||state.user?.id!==actor)throw Error('Account changed while building the route.');
+    if(!state.routeStops.length)throw Error('The route could not be built. Try selecting mapped houses first.');
+    rememberRouteChange();
+    return {status:'built',executed:true,stops:state.routeStops.length,selectedCount:state.selected.size,travelMode:state.routeMode,roadRouted:Boolean(state.routeGeometry),approximate:!state.routeGeometry,notice:state.routeGeometry?'Route built. Review the stops before navigation.':'Route built with a straight-line preview; the road routing service was unavailable.'};
+  }
   if(name==='build_timed_route'){
     if(state.routeBuilding)throw Error('A route is already being built. Try again when it finishes.');
     const actor=state.user?.id;
@@ -3358,7 +3384,7 @@ async function executeMapAssistantAction(name,args){
     const candidates=state.selected.size?[...state.selected].map(id=>state.leadsById.get(id)):state.filtered;
     const plan=planTimedRoute(candidates,{minutes:args.minutes,stopMinutes:args.stop_minutes,mode:args.mode||state.routeMode,start:state.currentLocation,limit:ROUTE_STOP_LIMIT});
     if(!plan.stops.length)throw Error('No mapped addresses are available in this area.');
-    state.routeMode=args.mode||state.routeMode;if($('routeMode'))$('routeMode').value=state.routeMode;
+    setRouteMode(args.mode||state.routeMode);
     state.selected=new Set(plan.stops.map(lead=>lead.id));$('routeCount').value=Math.min(80,Math.max(5,plan.stops.length));
     updateSelectedBadge();refreshSelectedMarkers();renderWorkList();
     await optimizeAndDrawRoute();
@@ -3374,21 +3400,22 @@ async function executeMapAssistantAction(name,args){
     rememberRouteChange();refreshSelectedMarkers();renderWorkList();
     const travel=state.routeDurationSeconds?state.routeDurationSeconds/60:null;
     const estimated=Math.round((travel??plan.travelMinutes)+state.routeStops.length*plan.stopMinutes);
-    return {status:'built',stops:state.routeStops.length,estimatedMinutes:estimated,targetMinutes:args.minutes,stopMinutes:plan.stopMinutes,roadTravelMinutes:travel?Math.round(travel):null,approximate:true,estimateSource:travel?'road routing plus visit time':'straight-line estimate; road router unavailable',limitedByAvailableAddresses:plan.stops.length===plan.available,notice:'Includes estimated time at each house. Actual visits and traffic vary. Review the route, then start navigation.'};
+    if(!state.routeStops.length)throw Error('The route could not be built.');
+    return {status:'built',executed:true,stops:state.routeStops.length,estimatedMinutes:estimated,targetMinutes:args.minutes,stopMinutes:plan.stopMinutes,roadTravelMinutes:travel?Math.round(travel):null,approximate:true,estimateSource:travel?'road routing plus visit time':'straight-line estimate; road router unavailable',limitedByAvailableAddresses:plan.stops.length===plan.available,notice:'Includes estimated time at each house. Actual visits and traffic vary. Review the route, then start navigation.'};
   }
   if(name==='remove_route_stop'){
     const match=state.routeStops.find(lead=>lead.id===args.stop||addressOf(lead).toLowerCase()===args.stop.toLowerCase());
     if(!match)throw Error('Stop not found. Read the current route first.');
-    if(state.selected.has(match.id))toggleSelected(match.id);renderWorkList();return {status:'removed',address:addressOf(match),remaining:state.routeStops.length};
+    if(state.selected.has(match.id))toggleSelected(match.id);renderWorkList();return {status:'removed',executed:true,address:addressOf(match),remaining:state.routeStops.length};
   }
   if(name==='route_navigation'){
-    if(args.action==='start'){beginInAppNav();return {status:state.navigating?'started':'not_started'};}
-    if(args.action==='pause'){pauseNavigation();return {status:'paused'};}
-    if(args.action==='resume'){resumeNavigation();return {status:state.navigating?'resumed':'not_active'};}
-    endNavigation('Navigation ended.');return {status:'ended'};
+    if(args.action==='start'){if(!state.routeStops.length)throw Error('Build a route first.');beginInAppNav();return {status:state.navigating?'started':'not_started',executed:state.navigating};}
+    if(args.action==='pause'){if(!state.navigating)throw Error('Navigation is not running.');pauseNavigation();return {status:'paused',executed:state.navPaused};}
+    if(args.action==='resume'){if(!state.navigating)throw Error('Navigation is not running.');resumeNavigation();return {status:'resumed',executed:!state.navPaused};}
+    endNavigation('Navigation ended.');return {status:'ended',executed:true};
   }
   if(name==='select_visible_addresses'){
-    selectClusterAddresses({leadIds:state.filtered.filter(isCoords).map(lead=>lead.id)});return {status:'selected',selectedCount:state.selected.size,limit:ROUTE_STOP_LIMIT};
+    selectClusterAddresses({leadIds:state.filtered.filter(isCoords).map(lead=>lead.id)});return {status:'selected',executed:true,selectedCount:state.selected.size,limit:ROUTE_STOP_LIMIT};
   }
   throw Error('Unsupported map command.');
 }

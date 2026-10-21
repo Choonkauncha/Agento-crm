@@ -20,7 +20,11 @@ export async function runPendingAssistantCommand(){
  const response=await fetch('/api/coach',{method:'POST',headers:{authorization:`Bearer ${session.data.session.access_token}`,'content-type':'application/json'},body:JSON.stringify({workspace:'map',toolCall:call})});
  const authorization=await response.json();
  if(!response.ok||!authorization.authorized||authorization.actorId!==pending.userId)throw Error(authorization.error||'Map command denied.');
- return mapContext.executeMapAction(authorization.execute.name,authorization.execute.args);
+ const current=await mapContext.sb.auth.getSession();
+ if(current.data?.session?.user?.id!==pending.userId)throw Error('Account changed.');
+ const result=await mapContext.executeMapAction(authorization.execute.name,authorization.execute.args);
+ document.dispatchEvent(new CustomEvent('tn-assistant-command-result',{detail:result}));
+ return result;
 }
 function guest(){currentUser=null;mapContext=null;orb=mountMapAssistant();}
 async function attach(session){
