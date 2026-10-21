@@ -227,7 +227,7 @@ function mountSectionNavigator() {
   const form =
     document.getElementById("setterForm") ||
     document.getElementById("homeForm");
-  if (!form) return;
+  if (!form || form.querySelector("#inspectionSteps")) return;
   const sections = [...form.querySelectorAll(".formSection")].filter(
     (section) => section.querySelector("h3"),
   );

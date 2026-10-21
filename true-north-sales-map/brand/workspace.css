@@ -473,3 +473,5 @@ body.tn-workspace .pageTourCard button:disabled { opacity: .45; cursor: not-allo
 .featureMatrix{width:100%;border-collapse:collapse;margin-top:24px}
 .featureMatrix th,.featureMatrix td{padding:14px;border-bottom:1px solid #415777;text-align:left}
 .featureMatrix input{width:22px;height:22px;vertical-align:middle;accent-color:#32c7f8}
+
+body.tn-workspace .routeStop .addressActions button{width:auto;height:auto;min-height:44px;font-size:12px;padding:8px 10px;color:#14223a;background:#fff;border:1px solid #8397af}body.tn-workspace .routeStop .addressActions button[data-groupme-lead]{background:#1767c9;color:white}

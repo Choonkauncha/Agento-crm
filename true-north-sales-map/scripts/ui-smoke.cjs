@@ -299,6 +299,12 @@ const server = http.createServer(async (req, res) => {
     let rows = (db[name] || []).map((row) =>
       name === "reps" && row.id === currentRep().id ? currentRep() : row,
     );
+    if (req.method === "PATCH") {
+      let body='';for await(const chunk of req)body+=chunk;
+      const data=JSON.parse(body);const id=url.searchParams.get('id')?.replace(/^eq\./,'');
+      writes.push({table:name,data:{id,...data}});for(const row of db[name]||[])if(row.id===id)Object.assign(row,data);
+      return send(res,[]);
+    }
     if (req.method === "POST") {
       let body = "";
       for await (const c of req) body += c;
@@ -506,6 +512,77 @@ const server = http.createServer(async (req, res) => {
     localStorage.setItem("sb-127-auth-token", JSON.stringify(s));
     localStorage.setItem("tn-role:" + s.user.id, "admin");
   }, session());
+  if (process.env.UI_SCHEDULING) {
+    page.setDefaultTimeout(20000);
+    role='appointment_setter';
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(origin+'/setter.html');
+    await page.locator('#setterApp').waitFor({state:'visible'});
+    await page.locator('#inspectionNext').click();
+    assert.equal(await page.locator('#inspectionStepStatus').innerText(),'Step 1 of 4','missing contact blocks advancement');
+    await page.locator('#s_first_name').fill('Test');
+    await page.locator('#s_last_name').fill('Homeowner');
+    await page.locator('#s_phone').fill('7405550100');
+    await page.locator('#inspectionNext').click();
+    await page.locator('#address').fill('123 Preview Street');
+    await page.locator('#zip').fill('43050');
+    await page.locator('#inspectionNext').click();
+    await page.locator('#concern').selectOption({label:'Recent weather concern'});
+    await page.locator('#inspectionNext').click();
+    assert.equal(await page.locator('#inspectionStepStatus').innerText(),'Step 4 of 4');
+    await page.locator('#s_date').fill('2026-11-15');
+    await page.locator('#s_time').fill('10:30');
+    await page.locator('#salesperson').selectOption(reps[2].id);
+    await page.locator('#consent_contact').check();
+    await page.screenshot({path:path.join(artifacts,'inspection-scheduling-mobile.png'),fullPage:true});
+    assert.ok(await page.locator('#inspectionGroupMe').isVisible());
+    assert.ok((await page.locator('#inspectionReview').innerText()).includes('123 Preview Street'));
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile form fits screen');
+    await page.locator('#setterForm button[type=submit]').click();
+    await page.locator('#saveStatus').filter({hasText:'Inspection saved'}).waitFor();
+    assert.equal(writes.filter(w=>w.table==='inspection').length,1);
+    await page.evaluate(()=>document.getElementById('setterForm').requestSubmit());
+    assert.equal(writes.filter(w=>w.table==='inspection').length,1);
+    await page.locator('#clearForm').click();
+    assert.equal(await page.locator('#inspectionStepStatus').innerText(),'Step 1 of 4');
+    role='admin';await page.setViewportSize({width:1440,height:1000});
+    await page.goto(origin+'/admin.html#scheduling');
+    await page.locator('#groupmeUrl').waitFor({state:'visible'});
+    await page.locator('#groupmeUrl').fill('https://evil.test/groupme.com');
+    await page.locator('#schedulingSettingsForm button[type=submit]').click();
+    assert.ok((await page.locator('#schedulingNotice').innerText()).includes('HTTPS link'));
+    await page.locator('#groupmeUrl').fill('https://groupme.com/join_group/123/test');
+    await page.locator('#schedulingSettingsForm button[type=submit]').click();
+    await page.locator('#schedulingNotice').filter({hasText:'saved'}).waitFor();
+    assert.ok(writes.some(w=>w.table==='field_settings'&&w.data.groupme_url==='https://groupme.com/join_group/123/test'));
+    await page.screenshot({path:path.join(artifacts,'admin-scheduling.png'),fullPage:true});
+    console.log('Inspection and settings checks passed; opening map');
+    await page.goto(origin+'/');
+    await page.waitForFunction(()=>window.__tnRoute?.pinPoint('TEST-0'));
+    console.log('Map pin ready');
+    if(await page.locator('#postSignInContinue').isVisible())await page.locator('#postSignInContinue').click();
+    await page.locator('#mapLoader').waitFor({state:'hidden'});
+    await page.evaluate(()=>window.__tnRoute.focus(40.39,-82.48,18));
+    await page.waitForFunction(()=>window.__tnRoute.openPopup('TEST-0'));
+    console.log('Desktop popup open');
+    await page.locator('.pinPopup [data-door-status="Knocked"]').click();
+    await page.waitForFunction(()=>!document.querySelector('.pinPopup'));
+    assert.ok(writes.some(w=>w.table==='leads'&&w.data.id==='TEST-0'&&w.data.status==='Knocked'),'Answered saves existing backend status');
+    await page.setViewportSize({width:390,height:844});
+    await page.waitForTimeout(300);
+    await page.waitForFunction(()=>window.__tnRoute.tap('TEST-1'));
+    await page.evaluate(()=>window.__tnRoute.tap('TEST-1'));
+    await page.locator('#doorSheetActions').waitFor({state:'visible'});
+    assert.ok(await page.locator('#doorSheetActions [data-groupme-lead]').isVisible());
+    await page.waitForTimeout(300);
+    await page.screenshot({path:path.join(artifacts,'address-actions-mobile.png')});
+    await page.locator('#doorSheetActions [data-door-status="No Answer"]').click();
+    await page.waitForFunction(()=>document.getElementById('doorSheet').getAttribute('aria-hidden')==='true');
+    assert.ok(writes.some(w=>w.table==='leads'&&w.data.id==='TEST-1'&&w.data.status==='No Answer'),'No Answer saves from phone sheet');
+    assert.deepEqual(errors,[]);
+    console.log('Inspection step validation, mobile fit, save once, reset, admin settings and desktop/phone address status saves passed');
+    await browser.close();server.close();return;
+  }
   if (process.env.UI_NAV_FLOW) {
     for (const nextRole of ['appointment_setter', 'salesperson', 'admin']) {
       role = nextRole;
@@ -737,8 +814,11 @@ const server = http.createServer(async (req, res) => {
   await page.locator("#s_first_name").fill("Test");
   await page.locator("#s_last_name").fill("Homeowner");
   await page.locator("#s_phone").fill("555-0100");
+  await page.locator("#inspectionNext").click();
   await page.locator("#address").fill("123 Preview Street");
   await page.locator("#zip").fill("43050");
+  await page.locator("#inspectionNext").click();
+  await page.locator("#inspectionNext").click();
   await page.locator("#consent_contact").check();
   await page.locator("#s_date").fill("2026-11-15");
   await page.locator("#s_time").fill("10:30");

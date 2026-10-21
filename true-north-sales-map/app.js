@@ -25,10 +25,18 @@ import { assertHandoffPhoto, handoffPermissions, isHandoffSetter, validateHandof
 import { canSeeReceipt, canUploadReceipt } from './lib/receipt-access.js';
 import { createDeferredAuthHandler } from './lib/auth-events.js';
 
+import { openGroupMe } from './tn-files/groupme.js';
 const STATUS_OPTIONS=['New','Knocked','No Answer','Interested','Appointment','Not Interested','Do Not Knock'];
 const DOOR_STATUSES=['Knocked','No Answer','Interested','Not Interested','Do Not Knock'].filter(s=>STATUS_OPTIONS.includes(s));
 // House-pin popup answer dropdown: label -> saved lead status.
-const DOOR_ANSWERS=[['Answered','Knocked'],['Not answered','No Answer']];
+const DOOR_ANSWERS=[['Answered','Knocked'],['No Answer','No Answer']];
+function addressActions(lead){return `<div class="addressActions" aria-label="Address actions">${DOOR_ANSWERS.map(([label,status])=>`<button type="button" data-door-lead="${esc(lead.id)}" data-door-status="${esc(status)}" aria-pressed="${leadStatus(lead)===status}">${label}</button>`).join('')}<button type="button" data-groupme-lead="${esc(lead.id)}">Schedule in GroupMe</button></div>`;}
+document.addEventListener('click',async event=>{
+ const door=event.target.closest('[data-door-lead]'), group=event.target.closest('[data-groupme-lead]');
+ if(!door&&!group)return; event.preventDefault();event.stopPropagation();
+ if(door)await applyDoorStatus(door.dataset.doorLead,door.dataset.doorStatus);
+ else {const lead=state.leadsById.get(group.dataset.groupmeLead);if(!lead)return;try{await openGroupMe(`Inspection request: ${addressOf(lead)}`);}catch(error){toast(error.message);}}
+});
 function doorAnswerOptions(current){return `<option value="" ${DOOR_ANSWERS.some(([,v])=>v===current)?'':'selected'}>Did they answer?</option>`+DOOR_ANSWERS.map(([label,value])=>`<option value="${esc(value)}" ${current===value?'selected':''}>${esc(label)}</option>`).join('');}
 function houseFormHref(l){const q=new URLSearchParams();if(l?.id)q.set('lead',l.id);if(l?.name)q.set('name',l.name);if(l?.address)q.set('address',l.address);if(l?.city)q.set('city',l.city);if(l?.state)q.set('state',l.state);if(l?.zip)q.set('zip',l.zip);const qs=q.toString();return `/forms.html${qs?`?${qs}`:''}`;}
 const doorSheetMedia=window.matchMedia('(max-width: 960px)');
@@ -1072,7 +1080,7 @@ function paintPagedList(list, rows){
   $('showMoreLeads')?.addEventListener('click',()=>{state.listShown=Math.min(rows.length, shown+180);state.listPaintToken='';paintPagedList(list, rows)});
 }
 function bindListRows(list){
-  list.querySelectorAll('.leadRow').forEach(el=>el.onclick=e=>{if(e.target.closest('.rowCheck'))return;openLead(el.dataset.id)});
+  list.querySelectorAll('.leadRow').forEach(el=>el.onclick=e=>{if(e.target.closest('.rowCheck,button,a,select'))return;openLead(el.dataset.id)});
   list.querySelectorAll('.rowCheck').forEach(cb=>cb.onchange=()=>{toggleSelected(cb.dataset.id);});
 }
 function leadHTML(l){
@@ -1084,7 +1092,7 @@ function leadHTML(l){
     <input class="rowCheck" type="checkbox" data-id="${esc(l.id)}" ${state.selected.has(l.id)?'checked':''}>
     <div class="rowBody"><div class="rowHeader"><strong>${esc(l.name||'Property lead')}</strong><span class="status ${statusClass(s)}">${esc(s)}</span></div>
     <div class="addr">${esc(l.address)}<br><span>${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)}</span></div>
-    <div class="rowMeta"><span class="score">${score} pts</span>${l.priority==='High'?`<span class="priorityTag">HIGH</span>`:''}${distance!=null?`<span>${distance.toFixed(1)} mi</span>`:''}${old?`<span>Built ${esc(old)}</span>`:''}${owner?`<span>${esc(owner)}</span>`:''}${territoryRep?`<span>Territory · ${esc(territoryRep)}</span>`:''}${appointment?`<span class="apptTag">APPT</span>`:''}</div></div></div>`;
+    ${addressActions(l)}<div class="rowMeta"><span class="score">${score} pts</span>${l.priority==='High'?`<span class="priorityTag">HIGH</span>`:''}${distance!=null?`<span>${distance.toFixed(1)} mi</span>`:''}${old?`<span>Built ${esc(old)}</span>`:''}${owner?`<span>${esc(owner)}</span>`:''}${territoryRep?`<span>Territory · ${esc(territoryRep)}</span>`:''}${appointment?`<span class="apptTag">APPT</span>`:''}</div></div></div>`;
 }
 function statusClass(s){return s.toLowerCase().replace(/\s+/g,'-')}
 
@@ -1211,7 +1219,7 @@ function stylePin(marker, lead){
 }
 function pinPopupHtml(lead){
   const s=leadStatus(lead);
-  return `<div class="pinPopup"><b class="pinPopupTitle">${esc(lead.address||'Property lead')}</b><select class="pinPopupAnswer" data-popup-answer="${esc(lead.id)}" aria-label="Did they answer?">${doorAnswerOptions(s)}</select><div class="popupActions"><button type="button" class="routeToggle" data-popup-route="${esc(lead.id)}">${routeToggleLabel(state.selected.has(lead.id))}</button><a class="popupForm" href="${esc(houseFormHref(lead))}">File form</a></div></div>`;
+  return `<div class="pinPopup"><b class="pinPopupTitle">${esc(lead.address||'Property lead')}</b>${addressActions(lead)}<select hidden class="pinPopupAnswer" data-popup-answer="${esc(lead.id)}" aria-label="Did they answer?">${doorAnswerOptions(s)}</select><div class="popupActions"><button type="button" class="routeToggle" data-popup-route="${esc(lead.id)}">${routeToggleLabel(state.selected.has(lead.id))}</button><a class="popupForm" href="${esc(houseFormHref(lead))}">File form</a></div></div>`;
 }
 function bindPinPopup(lead){
   setTimeout(()=>{
@@ -1602,6 +1610,9 @@ function openDoorSheet(id){
   const answer=$('doorSheetAnswer');
   answer.innerHTML=doorAnswerOptions(s);
   answer.disabled=false;
+  let actions=$('doorSheetActions');if(!actions){actions=document.createElement('div');actions.id='doorSheetActions';answer.after(actions);}
+  actions.innerHTML=addressActions(l);
+  answer.hidden=true;document.querySelector('.doorSheetAnswerLabel')?.setAttribute('hidden','');
   const sheet=$('doorSheet');
   const card=$('doorSheetCard');
   card.style.transform='';
@@ -1782,6 +1793,7 @@ function undoRouteAdd(){
 
 async function persistLeadPatch(l,patch){
   const previous=leadStatus(l);
+  const original={...l};
   const normalized={...patch};
   if('assignedRepId' in normalized){normalized.assigned_rep_id=normalized.assignedRepId;delete normalized.assignedRepId;}
   if('roofAgeYears' in normalized){normalized.roof_age_years=normalized.roofAgeYears;delete normalized.roofAgeYears;}
@@ -1793,7 +1805,7 @@ async function persistLeadPatch(l,patch){
   if(state.mode==='cloud'){
     const payload={...normalized,updated_at:nowISO(),updated_by:state.currentRep.id};
     const {error}=await state.supabase.from('leads').update(payload).eq('id',l.id);
-    if(error){alert(error.message);throw error;}
+    if(error){Object.assign(l,original);alert(error.message);throw error;}
     if(normalized.status&&previous!==normalized.status){
       await logActivity(l.id,'status_changed',{from_status:previous,to_status:normalized.status});
       window.TrueNorthField?.captureDoorStatus?.({leadId:l.id,status:normalized.status});
@@ -1814,7 +1826,7 @@ function openLead(id, options={}){
   $('drawerContent').innerHTML=`<div class="drawerTop" data-lead-id="${esc(l.id)}"><div><div class="eyebrow">FIELD RECORD</div><h2>${esc(l.name||'Property lead')}</h2><div class="drawerAddr">${esc(l.address)}<br>${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)}</div></div><span class="bigScore">${scoreLead(l)}</span></div>
     <section class="drawerSection" data-tn-panel="lead-details" data-tn-rank="primary"><h3>House details</h3><div class="detailGrid"><div><small>Source</small><b>${esc(l.source)}</b></div><div><small>Priority</small><b>${esc(l.priority||'Standard')}</b></div><div><small>Built</small><b>${esc(l.year_built??l.yearBuilt??'Unknown')}</b></div><div><small>Mapped</small><b>${esc(geocodeLabel(l))}</b></div></div>
     <div class="drawerActions"><button id="drawerMaps" class="darkBtn">Open Google Maps</button><button id="drawerDir" class="outlineBtn">Directions</button></div>
-    <div class="fieldActions"><button data-qstatus="Knocked">Knocked</button><button data-qstatus="No Answer">No answer</button><button data-qstatus="Interested">Interested</button><button data-qstatus="Not Interested">Not interested</button></div>
+    ${addressActions(l)}<div class="fieldActions"><button data-qstatus="Interested">Interested</button><button data-qstatus="Not Interested">Not interested</button></div>
     <label>Sales status</label><select id="dStatus">${STATUS_OPTIONS.map(x=>`<option value="${esc(x)}" ${leadStatus(l)===x?'selected':''}>${esc(x)}</option>`).join('')}</select>
     <label>Assigned rep</label><select id="dOwner"><option value="">Unassigned</option>${reps.map(r=>`<option value="${esc(r.id)}" ${l.assignedRepId===r.id?'selected':''}>${esc(r.name)} · ${esc(roleLabel(r.role))}</option>`).join('')}</select>
     <div class="verifiedGrid"><label>Roof age (verified)</label><input id="dRoofAge" type="number" min="0" max="100" value="${esc(l.roof_age_years??l.roofAgeYears??'')}" placeholder="e.g. 16"><label><input id="dRoofVerified" type="checkbox" ${l.roof_age_verified||l.roofAgeVerified?'checked':''}> verified</label></div>
@@ -1974,7 +1986,7 @@ function redrawPins(){
 function renderRouteStops(){
   $('openGoogleRouteBtn').disabled=!state.routeStops.length;
   $('optimizeRouteBtn').hidden=!state.routeStops.length;
-  $('routeStops').innerHTML=state.routeStops.map((l,i)=>`<div class="routeStop"><span>${i+1}</span><div><b>${esc(l.address)}</b><small>${esc(l.city)} · ${scoreLead(l)} pts</small></div><button type="button" aria-label="Remove ${esc(l.address || 'stop')} from route" data-route-lead="${esc(l.id)}">×</button></div>`).join('')||'<div class="empty">No route yet.</div>';
+  $('routeStops').innerHTML=state.routeStops.map((l,i)=>`<div class="routeStop"><span>${i+1}</span><div><b>${esc(l.address)}</b><small>${esc(l.city)} · ${scoreLead(l)} pts</small>${addressActions(l)}</div><button type="button" aria-label="Remove ${esc(l.address || 'stop')} from route" data-route-lead="${esc(l.id)}">×</button></div>`).join('')||'<div class="empty">No route yet.</div>';
   $('routeStops').querySelectorAll('[data-route-lead]').forEach(btn=>btn.onclick=()=>{toggleSelected(btn.dataset.routeLead);renderWorkList();});
 }
 function openGoogleRouteBlocks(){

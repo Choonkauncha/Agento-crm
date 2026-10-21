@@ -1,3 +1,5 @@
+import { createDeferredAuthHandler } from "../lib/auth-events.js";
+import { openGroupMe } from "./groupme.js";
 import { createClient } from "/vendor/supabase/supabase.js";
 
 import { easternToday, easternDayBounds } from "../lib/field-rules.js";
@@ -13,6 +15,7 @@ const ALLOWED = [
   "admin",
 ];
 
+let inspectionStep = 0;
 let cfg;
 let sb;
 let session;
@@ -52,10 +55,12 @@ async function load() {
   const { data } = await sb.auth.getSession();
   if (data.session) await enter(data.session);
   else showSetterSignedOut();
-  sb.auth.onAuthStateChange((event, next) => {
-    if (next) enter(next);
-    else if (event === "SIGNED_OUT") showSetterSignedOut();
-  });
+  sb.auth.onAuthStateChange(createDeferredAuthHandler({
+    initialSession:data.session,
+    onInvalidate(){session=null;rep=null;showSetterSignedOut();},
+    onSession:enter,
+    onError(error){$("loginError").textContent=error.message;showSetterSignedOut();}
+  }));
 }
 
 function splitName(name) {
@@ -172,11 +177,13 @@ async function submit(event) {
   event.preventDefault();
   const button = $("setterForm").querySelector("button[type=submit]");
   if (button.disabled) return;
+  const form = $("setterForm");
+  if(inspectionStep !== 3){moveInspectionStep(1);return;}
+  if(!form.reportValidity())return;
   $("clearForm").disabled = true;
   button.textContent = "Saving inspection…";
   $("saveError").textContent = "";
   $("saveStatus").textContent = "Saving…";
-  const form = $("setterForm");
   const data = Object.fromEntries(new FormData(form).entries());
   data.homeowner_confirmed = form.querySelector(
     "[name=homeowner_confirmed]",
@@ -252,9 +259,52 @@ $("clearForm").onclick = () => {
   button.disabled = false;
   button.textContent = "Save inspection";
   history.replaceState({}, "", location.pathname);
+  inspectionStep=0;renderInspectionStep();
   $("s_first_name").focus();
 };
 
+function inspectionSummary() {
+  return [
+    `Inspection request: ${$("s_first_name").value} ${$("s_last_name").value}`,
+    `Phone: ${$("s_phone").value}`,
+    `Property: ${$("address").value}, ${$("city").value}, ${$("state").value} ${$("zip").value}`,
+    `When: ${$("s_date").value} at ${$("s_time").value} (Eastern time)`,
+    `Sales rep: ${$("salesperson").selectedOptions[0]?.textContent || 'Unassigned'}`,
+    `Concern: ${$("concern").value || 'Not specified'}`,
+    `Notes: ${$("s_notes").value || 'None'}`
+  ].join('\n');
+}
+function renderInspectionStep() {
+  const sections=[...$("setterForm").querySelectorAll('[data-tn-panel^="setter-"]')];
+  sections.forEach((section,index)=>{section.hidden=index!==inspectionStep;});
+  $("inspectionConsent").hidden=inspectionStep!==3;
+  $("inspectionBack").hidden=inspectionStep===0;
+  $("inspectionNext").hidden=inspectionStep===3;
+  $("inspectionGroupMe").hidden=inspectionStep!==3;
+  $("setterForm").querySelector('[type=submit]').hidden=inspectionStep!==3;
+  $("inspectionStepStatus").textContent=`Step ${inspectionStep+1} of 4`;
+  $("inspectionSteps").innerHTML=['Contact','Property','Concerns','Schedule'].map((label,index)=>`<button type="button" data-step="${index}" ${index===inspectionStep?'aria-current="step"':''}>${index+1}. ${label}</button>`).join('');
+  $("inspectionSteps").querySelectorAll('button').forEach(button=>button.onclick=()=>{
+    const target=Number(button.dataset.step);if(target<=inspectionStep){inspectionStep=target;renderInspectionStep();}else moveInspectionStep(1);
+  });
+  $("inspectionReview").textContent=inspectionSummary();
+}
+function moveInspectionStep(direction) {
+  const sections=[...$("setterForm").querySelectorAll('[data-tn-panel^="setter-"]')];
+  if(direction>0){for(const input of sections[inspectionStep].querySelectorAll('input,select,textarea')){if(!input.reportValidity())return;}}
+  inspectionStep=Math.max(0,Math.min(3,inspectionStep+direction));renderInspectionStep();
+  sections[inspectionStep].querySelector('input,select,textarea')?.focus();
+}
+$("inspectionBack").onclick=()=>moveInspectionStep(-1);
+$("inspectionNext").onclick=()=>moveInspectionStep(1);
+$("setterForm").addEventListener('input',()=>{$("inspectionReview").textContent=inspectionSummary();});
+$("inspectionGroupMe").onclick=async()=>{
+  try{await openGroupMe(inspectionSummary());$("saveStatus").textContent='GroupMe opened. Paste the inspection summary into the chat. Save inspection here to record the appointment.';}
+  catch(error){$("saveError").textContent=error.message;}
+};
+// Validate one step at a time; the final submit validates the complete form.
+$("setterForm").noValidate=true;
+renderInspectionStep();
 load().catch((error) => {
   $("loginError").textContent =
     error.message || "Could not load your workspace. Please reload.";

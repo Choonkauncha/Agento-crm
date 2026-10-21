@@ -1,3 +1,4 @@
+import { mountSchedulingAdmin } from './tn-files/scheduling-admin.js';
 import { mountCoachAdmin } from './tn-files/coach-admin.js';
 import { mountFeatureAdmin } from './tn-files/feature-admin.js';
 import { createClient } from "/vendor/supabase/supabase.js";
@@ -192,6 +193,7 @@ async function enter(s) {
   me = profile;
   mountFeatureAdmin(sb,me);
   mountCoachAdmin(sb,me);
+  mountSchedulingAdmin(sb,me);
   rememberAdminRole(s.user, profile.role);
   await loadData();
   document.documentElement.dataset.tnAdmin = "ready";
@@ -616,7 +618,7 @@ function showTab(tab) {
 function applyAdminHash() {
   const target = adminHashTarget(location.hash);
   if (!target.tab) return;
-  if (["accounts","features"].includes(target.tab))
+  if (["accounts","features","scheduling"].includes(target.tab))
     document.querySelector(`#app [data-tab="${target.tab}"]`)?.click();
   else showTab(target.tab);
   if (target.messages) document.getElementById("openMessages")?.click();
