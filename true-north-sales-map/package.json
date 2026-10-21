@@ -11,7 +11,8 @@
     "test:field-update": "node scripts/active-route-removal.test.mjs && node scripts/live-location.test.mjs && node scripts/account-deletion.test.mjs && node scripts/field-rules.test.mjs && node scripts/role-access.test.mjs && node scripts/shift-day-load.test.mjs && node scripts/location-sharing.test.mjs && node scripts/quiet-location-ui.test.mjs && node scripts/location-access.test.mjs",
     "test:map-assistant": "node scripts/map-assistant.test.mjs && node scripts/voice-tools.test.mjs && node scripts/voice-actions.test.mjs && node scripts/live-token.test.mjs && node scripts/live-coach.test.mjs && node scripts/house-pin-tap.test.mjs && node scripts/map-layers.test.mjs && node scripts/global-assistant.test.mjs",
     "test:navigation": "UI_NAV_FLOW=1 node scripts/ui-smoke.cjs",
-    "test:scheduling": "node scripts/scheduling.test.mjs && node scripts/scheduling-api.test.mjs && UI_SCHEDULING=1 node scripts/ui-smoke.cjs"
+    "test:scheduling": "node scripts/scheduling.test.mjs && node scripts/scheduling-api.test.mjs && UI_SCHEDULING=1 node scripts/ui-smoke.cjs",
+    "test:assistant": "node scripts/assistant-command.test.mjs && node scripts/live-coach.test.mjs && node scripts/map-assistant.test.mjs && node scripts/global-assistant.test.mjs && UI_ASSISTANT=1 node scripts/ui-smoke.cjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

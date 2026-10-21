@@ -1,47 +1,75 @@
-/** True indexed 3D sphere mesh. Input/output levels come from Gemini audio, never random animation. */
+import {createOrbMesh,projectOrbVertex} from '../lib/orb-mesh.js';
+
+/** A rotating 3D triangle mesh. Deformation is driven by measured mic/playback energy. */
 export function mountCoachOrb(canvas){
- const stage=canvas.closest('.tnCoachOrbStage');let state='idle',input=0,output=0,energy=0,frame=0,dead=false;
+ const stage=canvas.closest('.tnCoachOrbStage');
+ let lastFrame=0;
+ let state='idle',input=0,output=0,inputAt=0,outputAt=0,energy=0,frame=0,dead=false,gl=null,program=null,software=null;
+ const mesh=createOrbMesh(),resources=[];
+ const reduced=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
  const setState=value=>{state=value;stage?.setAttribute('data-voice-state',value);};
- const setLevels=levels=>{if(Number.isFinite(levels?.input))input=Math.max(0,Math.min(1,levels.input));if(Number.isFinite(levels?.output))output=Math.max(0,Math.min(1,levels.output));};
- const gl=canvas.getContext('webgl',{alpha:true,antialias:true,powerPreference:'low-power'});
- const fallback=()=>{canvas.hidden=true;stage?.classList.add('tnCoachOrbFallback');return {setState,setLevels,dispose(){dead=true;}};};
- if(!gl)return fallback();
- const resources=[];let program,solid,wire,triangleCount,lineCount;
+ const setLevels=levels=>{
+  const now=performance.now();
+  if(Number.isFinite(levels?.input)){input=Math.max(0,Math.min(1,levels.input));inputAt=now;}
+  if(Number.isFinite(levels?.output)){output=Math.max(0,Math.min(1,levels.output));outputAt=now;}
+ };
+ function releaseGpu(){for(const [kind,item]of resources)kind==='buffer'?gl?.deleteBuffer(item):gl?.deleteShader(item);resources.length=0;if(program)gl?.deleteProgram(program);program=null;}
+ function softwareRenderer(){
+  releaseGpu();gl?.getExtension('WEBGL_lose_context')?.loseContext();gl=null;
+  // A canvas with an allocated WebGL context cannot also allocate a 2D context.
+  const replacement=canvas.ownerDocument.createElement('canvas');replacement.setAttribute('aria-hidden','true');canvas.replaceWith(replacement);canvas=replacement;
+  software=canvas.getContext('2d');
+  stage?.setAttribute('data-orb-renderer',software?'software-3d':'unavailable');
+  stage?.classList.toggle('tnCoachOrbFallback',!software);
+ }
+ let solid,wire,points,triangleCount,lineCount,uniforms;
  try{
-  const shader=(type,source)=>{const s=gl.createShader(type);resources.push(['shader',s]);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error('Mesh shader failed');return s;};
+  gl=canvas.getContext('webgl',{alpha:true,antialias:true,powerPreference:'low-power'});
+  if(!gl)throw Error('WebGL unavailable');
+  const debug=gl.getExtension('WEBGL_debug_renderer_info');
+  if(debug&&/swiftshader|llvmpipe/i.test(String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))))throw Error('Use the efficient software mesh on emulated GPUs');
+  const shader=(type,source)=>{const item=gl.createShader(type);resources.push(['shader',item]);gl.shaderSource(item,source);gl.compileShader(item);if(!gl.getShaderParameter(item,gl.COMPILE_STATUS))throw Error('Shader unavailable');return item;};
   program=gl.createProgram();
-  gl.attachShader(program,shader(gl.VERTEX_SHADER,`attribute vec3 position;uniform float time;uniform float energy;varying vec3 normal;varying vec3 world;
-  void main(){vec3 p=position;float pulse=1.+energy*.17+energy*.055*sin(p.y*14.+time*3.)*cos(p.x*13.-time*2.);p*=pulse;
-  float a=time*.14,c=cos(a),s=sin(a);float tilt=.35+sin(time*.17)*.16,ct=cos(tilt),st=sin(tilt);mat3 rotation=mat3(c,0.,s,0.,1.,0.,-s,0.,c)*mat3(1.,0.,0.,0.,ct,st,0.,-st,ct);p=rotation*p;normal=normalize(rotation*position);world=p;
-  float perspective=2.9/(3.3-p.z);gl_Position=vec4(p.xy*perspective*.86,-p.z*.12,1.);}`));
-  gl.attachShader(program,shader(gl.FRAGMENT_SHADER,`precision mediump float;uniform float wirePass;uniform float energy;uniform float speaking;varying vec3 normal;varying vec3 world;
-  void main(){vec3 n=normalize(normal);float light=max(0.,dot(n,normalize(vec3(-.5,.8,1.))));float rim=pow(1.-abs(n.z),2.);
-  vec3 base=mix(vec3(.01,.12,.22),vec3(.04,.62,.65),light);base=mix(base,vec3(.06,.31,.64),speaking*.35);base+=rim*vec3(.05,.32,.5);
-  vec3 line=mix(vec3(.22,.82,.87),vec3(.46,.65,1.),speaking);gl_FragColor=wirePass>.5?vec4(line*(.65+energy*.35),.72+energy*.25):vec4(base*.75,.28);}`));
-  gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Mesh program failed');
-  const vertices=[],triangles=[],lines=[],rows=26,cols=40;
-  for(let row=0;row<=rows;row++){const phi=Math.PI*row/rows;for(let col=0;col<=cols;col++){const theta=2*Math.PI*col/cols;vertices.push(Math.sin(phi)*Math.cos(theta),Math.cos(phi),Math.sin(phi)*Math.sin(theta));}}
-  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){const a=row*(cols+1)+col,b=a+cols+1;triangles.push(a,b,a+1,b,b+1,a+1);lines.push(a,b,a,a+1,a,b+1);}
-  const vertex=gl.createBuffer();resources.push(['buffer',vertex]);gl.bindBuffer(gl.ARRAY_BUFFER,vertex);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);
-  gl.useProgram(program);const attribute=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,3,gl.FLOAT,false,0,0);
-  solid=gl.createBuffer();wire=gl.createBuffer();resources.push(['buffer',solid],['buffer',wire]);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,solid);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(triangles),gl.STATIC_DRAW);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,wire);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(lines),gl.STATIC_DRAW);triangleCount=triangles.length;lineCount=lines.length;
- }catch{for(const [kind,item] of resources)kind==='buffer'?gl.deleteBuffer(item):gl.deleteShader(item);if(program)gl.deleteProgram(program);return fallback();}
- const uniforms=Object.fromEntries(['time','energy','speaking','wirePass'].map(name=>[name,gl.getUniformLocation(program,name)]));
- gl.enable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
- const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  gl.attachShader(program,shader(gl.VERTEX_SHADER,`attribute vec3 position;uniform float time;uniform float energy;uniform float pixels;varying vec3 normal;varying float depth;
+   void main(){float radius=1.+energy*.15+energy*.08*sin(position.y*9.+time*4.)*cos(position.x*8.-time*3.);float a=time*.18,c=cos(a),s=sin(a),ct=cos(.3),st=sin(.3);mat3 rotation=mat3(c,0.,-s,0.,1.,0.,s,0.,c)*mat3(1.,0.,0.,0.,ct,st,0.,-st,ct);vec3 p=rotation*position*radius;normal=normalize(rotation*position);depth=p.z;float perspective=2.9/(3.6-p.z);gl_Position=vec4(p.xy*perspective*.78,-p.z*.15,1.);gl_PointSize=pixels*(1.3+energy*1.8);}`));
+  gl.attachShader(program,shader(gl.FRAGMENT_SHADER,`precision mediump float;uniform float pass;uniform float energy;uniform float speaking;varying vec3 normal;varying float depth;
+   void main(){float light=max(0.,dot(normalize(normal),normalize(vec3(-.4,.6,1.))));vec3 cyan=vec3(.13,.9,.96),blue=vec3(.32,.56,1.);vec3 color=mix(cyan,blue,speaking);if(pass<.5){gl_FragColor=vec4(mix(vec3(.015,.07,.14),color*.36,light),.78);}else{float front=.25+.75*max(0.,normal.z);gl_FragColor=vec4(color*(.7+energy*.3),front*(pass>1.5?.9:.65));}}`));
+  gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('WebGL program unavailable');
+  const buffer=(target,data)=>{const item=gl.createBuffer();resources.push(['buffer',item]);gl.bindBuffer(target,item);gl.bufferData(target,data,gl.STATIC_DRAW);return item;};
+  points=buffer(gl.ARRAY_BUFFER,new Float32Array(mesh.vertices.flat()));gl.useProgram(program);
+  const position=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,3,gl.FLOAT,false,0,0);
+  solid=buffer(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(mesh.triangles.flat()));wire=buffer(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(mesh.edges.flat()));
+  triangleCount=mesh.triangles.length*3;lineCount=mesh.edges.length*2;
+  uniforms=Object.fromEntries(['time','energy','speaking','pass','pixels'].map(name=>[name,gl.getUniformLocation(program,name)]));
+  gl.enable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  stage?.setAttribute('data-orb-renderer','webgl');stage?.classList.remove('tnCoachOrbFallback');
+ }catch{softwareRenderer();}
+ const lost=event=>{event.preventDefault();if(!dead)softwareRenderer();};canvas.addEventListener('webglcontextlost',lost,{once:true});
  function render(now){
-  if(dead)return;frame=requestAnimationFrame(render);if(document.hidden)return;
-  const size=Math.max(1,Math.min(512,Math.round(canvas.getBoundingClientRect().width*Math.min(devicePixelRatio||1,2))));
-  if(canvas.width!==size||canvas.height!==size){canvas.width=size;canvas.height=size;gl.viewport(0,0,size,size);}
-  const target=['idle','paused','error'].includes(state)?0:Math.max(input,output);
-  energy+=(target-energy)*.22;
-  gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(program);
-  gl.uniform1f(uniforms.time,reduced?0:now*.001);gl.uniform1f(uniforms.energy,energy);gl.uniform1f(uniforms.speaking,state==='speaking'?1:0);
-  gl.uniform1f(uniforms.wirePass,0);gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,solid);gl.drawElements(gl.TRIANGLES,triangleCount,gl.UNSIGNED_SHORT,0);gl.disable(gl.POLYGON_OFFSET_FILL);
-  gl.uniform1f(uniforms.wirePass,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,wire);gl.drawElements(gl.LINES,lineCount,gl.UNSIGNED_SHORT,0);
+  if(dead)return;frame=requestAnimationFrame(render);if(document.hidden||now-lastFrame<30)return;lastFrame=now;
+  const dpr=Math.min(globalThis.devicePixelRatio||1,2),size=Math.max(1,Math.min(384,Math.round(canvas.getBoundingClientRect().width*dpr)));
+  if(canvas.width!==size||canvas.height!==size){canvas.width=size;canvas.height=size;gl?.viewport(0,0,size,size);}
+  const live=!['idle','paused','error'].includes(state);
+  const target=live?Math.max(now-inputAt<180?input:0,now-outputAt<180?output:0):0;
+  energy+=(target-energy)*(target>energy?.35:.12);
+  if(Math.abs(Number(stage?.style.getPropertyValue('--orb-energy')||0)-energy)>.01)stage?.style.setProperty('--orb-energy',energy.toFixed(3));
+  const time=reduced?0:now*.001;
+  if(gl){
+   gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(program);
+   gl.uniform1f(uniforms.time,time);gl.uniform1f(uniforms.energy,energy);gl.uniform1f(uniforms.speaking,state==='speaking'?1:0);gl.uniform1f(uniforms.pixels,dpr);
+   gl.uniform1f(uniforms.pass,0);gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,solid);gl.drawElements(gl.TRIANGLES,triangleCount,gl.UNSIGNED_SHORT,0);gl.disable(gl.POLYGON_OFFSET_FILL);
+   gl.uniform1f(uniforms.pass,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,wire);gl.drawElements(gl.LINES,lineCount,gl.UNSIGNED_SHORT,0);
+   gl.uniform1f(uniforms.pass,2);gl.drawArrays(gl.POINTS,0,mesh.vertices.length);
+  }else if(software){
+   const ctx=software;ctx.clearRect(0,0,size,size);
+   const projected=mesh.vertices.map(vertex=>projectOrbVertex(vertex,time,energy,0));
+   const color=state==='speaking'?'114,164,255':'65,223,235';
+   const screen=point=>[size/2+point.x*size/2,size/2-point.y*size/2];
+   const faces=mesh.triangles.map(face=>({face,z:face.reduce((sum,i)=>sum+projected[i].z,0)/3})).sort((a,b)=>a.z-b.z);
+   for(const {face,z}of faces){ctx.beginPath();face.forEach((i,j)=>{const [x,y]=screen(projected[i]);if(j)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle=`rgba(8,28,48,${z>0?.8:.35})`;ctx.fill();ctx.strokeStyle=`rgba(${color},${.15+Math.max(0,z)*.55+energy*.12})`;ctx.lineWidth=dpr*.65;ctx.stroke();}
+   for(const point of projected){if(point.z<0)continue;const [x,y]=screen(point);ctx.beginPath();ctx.arc(x,y,dpr*(.7+energy),0,Math.PI*2);ctx.fillStyle=`rgba(${color},${.45+point.z*.4})`;ctx.fill();}
+  }
  }
  frame=requestAnimationFrame(render);
- return {setState,setLevels,dispose(){dead=true;cancelAnimationFrame(frame);for(const [kind,item] of resources)kind==='buffer'?gl.deleteBuffer(item):gl.deleteShader(item);gl.deleteProgram(program);}};
+ return {setState,setLevels,dispose(){dead=true;cancelAnimationFrame(frame);canvas.removeEventListener('webglcontextlost',lost);releaseGpu();}};
 }

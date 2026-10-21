@@ -2,9 +2,11 @@
 
 Hover or right-click a numbered cluster for Select all addresses or Zoom into area. Tap opens the same menu on touchscreens. Selection respects the existing 80-stop route limit and reports how many homes remain unselected.
 
-The floating mesh orb is available after cloud sign-in. Open it and tap Start voice; allow the browser microphone prompt. Pause disables microphone transmission; End releases microphone/audio resources. Minimize keeps the active conversation running. The sphere uses indexed 3D triangles plus wire edges; deformation follows microphone RMS and actual audio-output analyser levels. A static icon is used when WebGL is unavailable.
+The floating mesh orb is available after cloud sign-in. Open it and tap Start voice; allow the browser microphone prompt. Pause disables microphone transmission; End releases microphone/audio resources. Minimize keeps the active conversation running. The sphere uses indexed 3D triangles plus wire edges; deformation follows microphone RMS and actual audio-output analyser levels. When WebGL is unavailable, a software renderer projects and shades the same rotating 3D triangle mesh. It remains reactive to actual input/output levels, decays to quiet when audio stops, and respects reduced-motion preferences.
 
 Supported map commands:
+- “Build my route” or “Build a walking route with 12 houses.” Uses selected homes first; otherwise picks nearby homes from the current filters.
+- “Clear my route.” Clears local selections and built stops and ends navigation; does not delete address records or employee saved routes.
 - “Build a route that takes about two hours.” Travel plus five minutes per house by default; selected addresses take priority, otherwise current filters. Road routing refines the estimate. Review the estimate before starting.
 - “Remove [exact address] from my route.” Works while navigating.
 - “Start/pause/resume/end navigation.”
@@ -16,8 +18,11 @@ Use existing GEMINI_API_KEY, GEMINI_LIVE_MODEL and optional GEMINI_LIVE_VOICE on
 
 All map tools re-authenticate using the current Supabase JWT. Map/Coach and relevant Routes/Weather permissions are enforced server-side. Personal context is scoped to the actor; tool-provided user IDs are ignored. Browser route execution checks the current account again after authorization. No arbitrary code, SQL, profile deletion or unrestricted command execution is exposed.
 
-Validation: focused route budgeting, cluster membership, statewide weather parsing, UTC report-day rollover, missing feeds, command allowlisting, current-actor checks, feature denials, ephemeral-token setup, and audio lifecycle tests. Local browser and microphone end-to-end checks could not run because the Chromium download returned an invalid archive. Live Gemini audio still needs a signed-in microphone-capable browser check.
+Validation: focused route budgeting, cluster membership, statewide weather parsing, UTC report-day rollover, missing feeds, command allowlisting, current-actor checks, feature denials, ephemeral-token setup, and audio lifecycle tests. The `test:assistant` suite uses a synthetic authenticated browser, actual map route execution, and a simulated Gemini WebSocket to check button/voice build and clear, duplicate tool-call IDs, permission denials, mobile layout, GPU/software mesh rendering, and audio level response. This does not validate a production Gemini connection or speech-recognition accuracy; live service access still depends on the configured Gemini key/model and browser microphone permission.
 
 
 ## Shared overlay
 The orb loads on every HTML screen, including management, profile, forms, photos, shifts, training, public intake and sign-in. Signed-out visitors see the orb with disabled voice controls. It overlays app modals, while print output omits it. Drag the orb or use Shift + arrow keys; its normalized position is saved on this device and clamped after resize. Route commands on another page open the field map and reauthorize the queued command before execution. Full page navigation releases the current audio session; tap Start voice again on the destination page.
+
+## Action panel
+Quick actions use the same freshly authorized command gateway as voice. They do not need an active Gemini session. Build route, Plan 2 hours, Select houses, and Clear route show actual app results. Commands execute sequentially; repeated Gemini tool-call IDs reuse the result instead of rebuilding twice. Errors are returned to Gemini and displayed in the panel. Ending voice cancels queued tool calls. Changing another employee’s route through the assistant is blocked; close that route first.

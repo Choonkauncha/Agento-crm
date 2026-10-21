@@ -81,6 +81,10 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
   let generation = 0;
   let startController = null;
   let setupTimer = null;
+  let toolQueue=Promise.resolve();
+  const toolRuns=new Map();
+  const toolControllers=new Map();
+  const cancelledTools=new Set();
   const voiceOwner=Symbol('live-voice');
   const otherVoice=event=>{if(event.detail!==voiceOwner&&!stopped)stop();};
 
@@ -108,7 +112,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     if (current && current.readyState < 2) current.close(1000, 'Live Coach ended');
   }
 
-  function cleanup() { if(typeof document!=='undefined')document.removeEventListener('tn-live-voice-start',otherVoice);clearTimeout(setupTimer); setupTimer = null; cleanupAudio(); cleanupOutput(); cleanupSocket(); emit(onAudioLevel,{input:0,output:0}); }
+  function cleanup() { for(const controller of toolControllers.values())controller.abort();toolControllers.clear();toolRuns.clear();cancelledTools.clear();toolQueue=Promise.resolve();if(typeof document!=='undefined')document.removeEventListener('tn-live-voice-start',otherVoice);clearTimeout(setupTimer); setupTimer = null; cleanupAudio(); cleanupOutput(); cleanupSocket(); emit(onAudioLevel,{input:0,output:0}); }
 
   function playAudio(value) {
     if (stopped || paused || !outputContext || !value) return;
@@ -125,11 +129,13 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     source.start(start); nextOutputTime = start + buffer.duration;
   }
 
-  async function executeTool(call) {
+  async function executeTool(call, signal) {
+    if(signal?.aborted||stopped)throw Error('Command cancelled.');
     const session = await ctx.sb.auth.getSession();
     const token = session.data?.session?.access_token;
     if (!token) throw new Error('Sign in again to use voice actions.');
-    if(workspace==='map')return executeMapTool(call);
+    if(signal?.aborted||stopped)throw Error('Command cancelled.');
+    if(workspace==='map')return executeMapTool(call,{signal});
     const response = await fetch('/api/coach', {method:'POST', headers:{authorization:`Bearer ${token}`,'content-type':'application/json'}, body:JSON.stringify({toolCall:{name:call.name,args:call.args}}), signal:AbortSignal.timeout(12000)});
     const data = await response.json().catch(()=>({error:'Voice action failed'}));
     if (!response.ok) return {error:data.error || 'Action denied'};
@@ -153,14 +159,30 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
       } catch (error) { if (error?.name !== 'AbortError' && attempt === generation) fail(error); }
       return;
     }
+    if(message?.toolCallCancellation?.ids){
+      for(const id of message.toolCallCancellation.ids){cancelledTools.add(id);toolControllers.get(id)?.abort();}
+    }
     if (message?.toolCall?.functionCalls?.length) {
       const functionResponses=[];
       for (const call of message.toolCall.functionCalls) {
-        let result;
-        try { result=await executeTool(call); } catch { result={error:'Voice action could not be completed'}; }
-        functionResponses.push({id:call.id,name:call.name,response:result});
+        if(attempt!==generation||stopped)break;
+        const key=call.id;
+        let pending=key?toolRuns.get(key):null;
+        if(!pending){
+          const commandController=new AbortController();
+          if(key){toolControllers.set(key,commandController);if(cancelledTools.has(key))commandController.abort();}
+          pending=toolQueue.then(async()=>{
+            if(attempt!==generation||stopped||commandController.signal.aborted)return {error:'Command cancelled.',executed:false};
+            try{return await executeTool(call,commandController.signal);}
+            catch(error){return {error:error.message||'Voice action could not be completed',executed:false};}
+          });
+          toolQueue=pending.catch(()=>{});
+          if(key){toolRuns.set(key,pending);if(toolRuns.size>100){const oldest=toolRuns.keys().next().value;if(oldest!==key){toolRuns.delete(oldest);toolControllers.delete(oldest);}}}
+        }
+        const result=await pending;
+        if(!key||!toolControllers.get(key)?.signal.aborted)functionResponses.push({id:call.id,name:call.name,response:result});
       }
-      if (attempt === generation && !stopped) send({toolResponse:{functionResponses}});
+      if (functionResponses.length && attempt === generation && !stopped) send({toolResponse:{functionResponses}});
       return;
     }
     const content = message?.serverContent;
@@ -171,7 +193,7 @@ export function createLiveCoach(ctx, { onState, onTranscript, onError, onExpires
     if (content?.inputTranscription?.text) emit(onTranscript, { role: 'user', text: content.inputTranscription.text, final: false });
     if (content?.outputTranscription?.text) emit(onTranscript, { role: 'assistant', text: content.outputTranscription.text, final: false });
     for (const part of content?.modelTurn?.parts || []) if (part?.inlineData?.data) playAudio(part.inlineData.data);
-    if (content?.turnComplete) { emit(onTranscript, { role: 'assistant', text: '', final: true }); state(paused ? 'paused' : 'listening'); }
+    if (content?.turnComplete) { emit(onTranscript, { role: 'assistant', text: '', final: true }); state(paused ? 'paused' : outputSources.size ? 'speaking' : 'listening'); }
   }
 
   function send(value) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }

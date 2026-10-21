@@ -22,8 +22,9 @@ const fetchImpl=async(url,options={})=>{
  if(url.includes('password_gate_status'))return new Response(JSON.stringify({must_change:false,impersonating:false}));
  return new Response('[]');
 };
-const request=()=>new Request('https://app.test/api/coach',{method:'POST',headers:{authorization:'Bearer signed-in'},body:JSON.stringify({workspace:'map',actorId:'spoof',toolCall:{name:'build_timed_route',args:{minutes:120}}})});
+const request=(toolCall={name:'build_timed_route',args:{minutes:120}})=>new Request('https://app.test/api/coach',{method:'POST',headers:{authorization:'Bearer signed-in'},body:JSON.stringify({workspace:'map',actorId:'spoof',toolCall})});
 const options={env:{SUPABASE_URL:'https://db.test',SUPABASE_ANON_KEY:'public'},fetchImpl};
 let response=await handleVoiceAction(request(),options);assert.equal(response.status,200);assert.equal((await response.json()).actorId,user);
 enabled=false;response=await handleVoiceAction(request(),options);assert.equal(response.status,403);
+for(const toolCall of [{name:'build_route',args:{count:12}},{name:'clear_route',args:{}}]){enabled=true;const allowed=await handleVoiceAction(request(toolCall),options);assert.equal(allowed.status,200);const data=await allowed.json();assert.equal(data.actorId,user);assert.equal(data.execute.name,toolCall.name);enabled=false;assert.equal((await handleVoiceAction(request(toolCall),options)).status,403);}
 console.log('Map assistant: cluster membership, timed route budget, command validation, Ohio filtering/dates/units/failures, server identity and route permissions passed');
