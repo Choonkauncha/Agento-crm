@@ -1,3 +1,4 @@
+import { activateAdminTab } from '../lib/admin-tabs.js';
 import { createClient } from "/vendor/supabase/supabase.js";
 import { esc } from "./ui.js";
 import {
@@ -38,22 +39,7 @@ function mount() {
 }
 
 function revealAccounts() {
-  const changed = document.getElementById("tab-accounts")?.classList.contains("hidden");
-  if (changed) window.scrollTo({top: 0, behavior: "instant"});
-  history.replaceState(null, "", "#accounts");
-  document.dispatchEvent(
-    new CustomEvent("tn-admin-view", { detail: "accounts" }),
-  );
-  document
-    .querySelectorAll("#app [data-tab]")
-    .forEach((item) =>
-      item.classList.toggle("active", item.dataset.tab === "accounts"),
-    );
-  document
-    .querySelectorAll("#app main section[id^=tab-]")
-    .forEach((item) =>
-      item.classList.toggle("hidden", item.id !== "tab-accounts"),
-    );
+  activateAdminTab(document, 'accounts');
 }
 
 let sb = null;
@@ -65,6 +51,9 @@ let notice = "";
 let openLink = null;
 let resetId = "";
 let accountsCacheReady = false;
+let accountsCacheUser = null;
+let accountsRevision = 0;
+let accountsEpoch = 0;
 let archiveVisible = false;
 let archivedProfiles = [];
 let mutationPending = false;
@@ -73,11 +62,7 @@ const accountFilters = { query: "", role: "", status: "" };
 async function show(force) {
   const root = document.getElementById("tnAccounts");
   if (!root) return;
-  if (accountsCacheReady && !force) {
-    render();
-    revealAccounts();
-    return;
-  }
+  let revision = accountsRevision;
   root.innerHTML =
     '<div class="tnSkeleton" aria-hidden="true"><span></span><span></span><span></span></div>';
   try {
@@ -90,13 +75,29 @@ async function show(force) {
         return;
       }
       sb = createClient(cfg.url, cfg.publishableKey);
+      sb.auth.onAuthStateChange((event, next) => {
+        if (event === 'SIGNED_OUT' || (session && session.user.id !== next?.user?.id)) {
+          accountsRevision++; accountsEpoch++; mutationPending = false;
+          accountsCacheReady = false; accountsCacheUser = null;
+          people = []; me = null; detail = null; openLink = null; resetId = '';
+          archiveVisible = false; archivedProfiles = []; notice = '';
+          root.replaceChildren();
+        }
+        session = next;
+      });
     }
+    revision = ++accountsRevision;
     const got = await sb.auth.getSession();
+    if (revision !== accountsRevision) return;
+    if (got.error) throw got.error;
     session = got.data.session;
     if (!session) {
       root.innerHTML =
         '<h1 class="tnTitle">Accounts</h1><p class="tnSub">Sign in as an admin or manager.</p>';
       return;
+    }
+    if (accountsCacheReady && accountsCacheUser === session.user.id && !force) {
+      render(); return;
     }
     const row = await sb
       .from("reps")
@@ -104,6 +105,8 @@ async function show(force) {
       .eq("user_id", session.user.id)
       .eq("active", true)
       .maybeSingle();
+    if (revision !== accountsRevision) return;
+    if (row.error) throw row.error;
     me = managementProfile({
       email: session.user.email,
       rep: row.data,
@@ -115,12 +118,15 @@ async function show(force) {
         '<h1 class="tnTitle">Accounts</h1><p class="tnSub">Only an admin or manager can manage logins.</p>';
       return;
     }
-    people = await loadPeople(sb);
-    accountsCacheReady = true;
+    const loaded = await loadPeople(sb);
+    if (revision !== accountsRevision) return;
+    people = loaded;
+    accountsCacheReady = true; accountsCacheUser = session.user.id;
     render();
-    revealAccounts();
   } catch (error) {
-    root.innerHTML = `<h1 class="tnTitle">Accounts</h1><p class="tnError">${esc(error.message)}</p>`;
+    if (revision !== accountsRevision) return;
+    root.innerHTML = `<h1 class="tnTitle">Accounts</h1><p class="tnError" role="alert">${esc(error.message)}</p><button type="button" class="btn" id="accountsRetry">Retry loading accounts</button>`;
+    root.querySelector('#accountsRetry').onclick = () => show(true);
   }
 }
 
@@ -217,6 +223,7 @@ function renderPeople() {
     `${filteredPeople().length} of ${people.length} people`;
 }
 function render() {
+  if (!me || !session || session.user.id !== accountsCacheUser) return;
   const root = document.getElementById("tnAccounts");
   const options = rolesForMe()
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
@@ -246,21 +253,25 @@ function render() {
   };
   bindPersonActions(root);
   document.getElementById("tnShowArchive")?.addEventListener("click", async () => {
+    const current = accountOwner();
     try {
       const result = await post({ action: "archive" });
+      if (!current()) return;
       archivedProfiles = result.profiles || [];
       archiveVisible = true;
       render();
-    } catch (error) { notice = error.message; render(); }
+    } catch (error) { if (current()) { notice = error.message; render(); } }
   });
   root.querySelectorAll('[data-purge-profile]').forEach(button=>button.addEventListener('click',async()=>{
     if(mutationPending || !confirm('Permanently remove this archived profile and its saved account history?')) return;
+    const current = accountOwner();
     mutationPending=true;button.disabled=true;
     try{
       await post({action:'delete',repId:button.dataset.purgeProfile});
+      if (!current()) return;
       archivedProfiles=archivedProfiles.filter(person=>person.id!==button.dataset.purgeProfile);
       notice='Archived profile permanently removed.';
-    }catch(error){notice=error.message;}finally{mutationPending=false;render();}
+    }catch(error){if(current())notice=error.message;}finally{if(current()){mutationPending=false;render();}}
   }));
   document.getElementById("tnCloseArchive")?.addEventListener("click", () => { archiveVisible = false; render(); });
   for (const [id, key] of [
@@ -275,7 +286,6 @@ function render() {
         renderPeople();
       });
   }
-  revealAccounts();
 }
 
 function linkHtml() {
@@ -329,7 +339,20 @@ function when(iso) {
   }
 }
 
+function accountOwner() {
+  const epoch = accountsEpoch, userId = session?.user.id;
+  return () => epoch === accountsEpoch && userId === session?.user.id && userId === accountsCacheUser;
+}
+
 async function post(body) {
+  const current = accountOwner();
+  const assertCurrent = () => { if (!current()) throw new Error('Account session changed. Open Accounts again to continue.'); };
+  const got = await sb.auth.getSession();
+  assertCurrent();
+  if (got.error) throw got.error;
+  const fresh = got.data.session;
+  if (!fresh || fresh.user.id !== accountsCacheUser) throw new Error('Sign in again before changing accounts.');
+  session = fresh;
   const response = await fetch("/api/accounts", {
     method: "POST",
     headers: {
@@ -338,7 +361,9 @@ async function post(body) {
     },
     body: JSON.stringify(body),
   });
+  assertCurrent();
   const data = await response.json().catch(() => ({}));
+  assertCurrent();
   if (!response.ok)
     throw new Error(data.error || "Could not update that account.");
   return data;
@@ -350,6 +375,7 @@ async function createAccount(event) {
   const form = event.currentTarget;
   if (!form.reportValidity()) return;
   const values = Object.fromEntries(["acctName", "acctEmail", "acctRole"].map(id => [id, document.getElementById(id).value]));
+  const current = accountOwner();
   mutationPending = true;
   const submit = form.querySelector('[type="submit"]');
   submit.disabled = true;
@@ -363,6 +389,7 @@ async function createAccount(event) {
       role: document.getElementById("acctRole").value,
       password: document.getElementById("acctPassword").value,
     });
+    if (!current()) return;
     notice = "Login created. They choose their own password when they sign in." + (result.warning ? " " + result.warning : "");
     resetId = "";
     detail = null;
@@ -370,18 +397,20 @@ async function createAccount(event) {
     accountsCacheReady = false;
     await show(true);
   } catch (error) {
+    if (!current()) return;
     notice = error.message;
     render();
     document.querySelector(".accountCreate").open = true;
     for (const [id, value] of Object.entries(values)) document.getElementById(id).value = value;
     document.getElementById("acctPassword").focus();
-  } finally { mutationPending = false; }
+  } finally { if (current()) mutationPending = false; }
 }
 
 async function act(action, repId) {
   if (mutationPending) return;
   const person = people.find((item) => item.id === repId);
   if (!person) return;
+  const current = accountOwner();
   notice = "";
   openLink = null;
   try {
@@ -389,6 +418,7 @@ async function act(action, repId) {
       if (!confirm(`Delete ${person.name}'s profile and login permanently? They will lose access and their profile, login, and account archive will be removed. Company leads, photos, and submitted forms are kept.`)) return;
       mutationPending = true;
       const result = await post({ action: "delete", repId });
+      if (!current()) return;
       people = people.filter(item => item.id !== repId);
       resetId = "";
       detail = null;
@@ -400,9 +430,11 @@ async function act(action, repId) {
       return;
     } else if (action === "active") {
       const result = await post({ action: "set-active", repId, active: !person.active });
+      if (!current()) return;
       notice = (person.active ? "Login turned off." : "Login turned on.") + (result.warning ? " " + result.warning : "");
     } else if (action === "open") {
       const result = await post({ action: "open-as", repId });
+      if (!current()) return;
       openLink = {
         id: repId,
         url: result.url,
@@ -431,29 +463,35 @@ async function act(action, repId) {
           .order("created_at", { ascending: false })
           .limit(12),
       ]);
+      if (!current()) return;
       detail.activity = activity.data || [];
       detail.photos = photos.data || [];
       detail.forms = forms.data || [];
     }
     if (action !== "work") detail = null;
     await refreshPeople();
+    if (!current()) return;
     render();
     if (openLink) document.getElementById("tnCopyLink").onclick = copyLink;
   } catch (error) {
+    if (!current()) return;
     notice = error.message;
     render();
-  } finally { mutationPending = false; }
+  } finally { if (current()) mutationPending = false; }
 }
 
 async function saveReset(event, repId, password) {
   event.preventDefault();
+  const current = accountOwner();
   notice = "";
   try {
     const result = await post({ action: "reset", repId, password });
+    if (!current()) return;
     resetId = "";
     notice = "Password reset." + (result.warning ? " " + result.warning : "");
     render();
   } catch (error) {
+    if (!current()) return;
     notice = error.message;
     render();
   }
@@ -461,30 +499,33 @@ async function saveReset(event, repId, password) {
 
 async function loadPeople(client) {
   const listed = await client.rpc("account_directory");
-  const rows =
-    !listed.error && Array.isArray(listed.data)
-      ? listed.data
-      : (
-          await client
-            .from("reps")
-            .select("id,user_id,name,role,active")
-            .order("name")
-        ).data || [];
+  let rows = listed.data;
+  if (listed.error || !Array.isArray(rows)) {
+    const fallback = await client.from('reps').select('id,user_id,name,role,active').order('name');
+    if (fallback.error) throw fallback.error;
+    rows = fallback.data || [];
+  }
   return rows
     .slice()
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
 
 async function refreshPeople() {
-  people = await loadPeople(sb);
+  const current = accountOwner();
+  const loaded = await loadPeople(sb);
+  if (current()) people = loaded;
 }
 
 async function copyLink() {
+  const current = accountOwner(), link = openLink;
+  if (!link) return;
   try {
-    await navigator.clipboard.writeText(openLink.url);
+    await navigator.clipboard.writeText(link.url);
+    if (!current()) return;
     notice = "Link copied.";
   } catch {
-    notice = openLink.url;
+    if (!current()) return;
+    notice = link.url;
   }
   render();
   document.getElementById("tnCopyLink").onclick = copyLink;

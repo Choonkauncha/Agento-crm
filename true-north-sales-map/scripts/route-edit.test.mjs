@@ -19,6 +19,17 @@ assert.deepEqual(added.stops.map((stop) => stop.id), ['a', 'b', 'c']);
 assert.equal(added.appended, 1);
 assert.equal(added.removed, 0);
 
+for (const point of [
+  { lat: null, lng: null }, { lat: '', lng: -82 }, { lat: '  ', lng: -82 },
+  { lat: false, lng: -82 }, { lat: 91, lng: -82 }, { lat: 40, lng: -181 }
+]) {
+  const invalid = { id: 'invalid', ...point };
+  const revised = reviseBuiltRoute(built, new Set(['a', 'b', 'invalid']), new Map([...leads, ['invalid', invalid]]));
+  assert.deepEqual(revised.stops, built, 'unmapped or invalid houses cannot become stops after build');
+}
+const zero = { id: 'zero', lat: '0', lng: 0 };
+assert.equal(reviseBuiltRoute([], new Set(['zero']), new Map([['zero', zero]])).appended, 1, 'zero coordinates are valid');
+
 const removed = reviseBuiltRoute(added.stops, new Set(['b', 'c']), leads);
 assert.deepEqual(removed.stops.map((stop) => stop.id), ['b', 'c']);
 assert.equal(removed.removed, 1);

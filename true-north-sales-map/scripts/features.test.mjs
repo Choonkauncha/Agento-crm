@@ -14,7 +14,11 @@ await assert.rejects(()=>requireFeature(new Request('https://app.example'), 'coa
 await assert.rejects(()=>requireFeature(request,'coach',{env,fetchImpl:async()=>new Response('false')}),e=>e.status===403);
 await assert.rejects(()=>requireFeature(request,'coach',{env,fetchImpl:async()=>new Response('{}',{status:500})}),e=>e.status===503);
 await assert.rejects(()=>requireFeature(request,'coach',{env,fetchImpl:async()=>new Response('{}',{status:404})}),e=>e.status===503);
+for (const fetchImpl of [async()=>{throw Error('offline');}, async()=>new Response('not JSON'), async()=>new Response('{}'), async()=>new Response('null')]) {
+ await assert.rejects(()=>requireFeature(request,'coach',{env,fetchImpl}),e=>e.status===503&&e.public===true,'Unavailable or invalid permissions must fail closed with a retryable error');
+}
+await assert.rejects(()=>requireFeature(request,'coach',{env:{},fetchImpl:async()=>{throw Error('Must not fetch without configuration');}}),e=>e.status===503);
 await requireFeature(request,'coach',{env,fetchImpl:async(url,options)=>{
- assert.equal(url,'https://db.example/rest/v1/rpc/feature_enabled');assert.equal(options.headers.Authorization,'Bearer user-token');assert.equal(JSON.parse(options.body).requested,'coach');return new Response('true');
+ assert.equal(url,'https://db.example/rest/v1/rpc/feature_enabled');assert.equal(options.headers.Authorization,'Bearer user-token');assert.equal(JSON.parse(options.body).requested,'coach');assert.ok(options.signal instanceof AbortSignal);return new Response('true');
 }});
 console.log('Feature role defaults, manager/admin access, authentication and denied feature requests passed');
