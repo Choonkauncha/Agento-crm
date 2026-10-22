@@ -47,7 +47,7 @@ for (const page of pages) {
 const index = read('index.html');
 assert.ok(index.includes('class="tn-map"'));
 assert.ok(index.includes('tn-signed-out'));
-assert.ok(index.includes('body>*:not(#loginModal):not(#tnPasswordHold){display:none!important}'));
+assert.match(index,/body>\*:not\(#loginModal\):not\(#tnPasswordHold\)(?::not\(#tnMapAssistant\))?\{display:none!important\}/,'signed-out CSS hides private content while allowing the public assistant');
 assert.ok(index.includes('#loginModal{display:flex!important;background:#0c1424!important'));
 
 const admin = read('admin.html');

@@ -153,12 +153,15 @@ function assertThreadAccess(ctx, thread) {
 async function viewStatus(ctx) {
   const field = isFieldRole(ctx.rep.role);
   const admin = isAdminRole(ctx.rep.role);
-  const consent = field ? await consentRow(ctx) : null;
-  const shift = field ? await openShift(ctx) : null;
+  const [shiftsEnabled, messagesEnabled] = field
+    ? await Promise.all(['shifts', 'messages'].map(feature => featureAvailable(ctx, feature)))
+    : [false, admin];
+  const consent = shiftsEnabled ? await consentRow(ctx) : null;
+  const shift = shiftsEnabled ? await openShift(ctx) : null;
   let unread = 0;
   let threadId = null;
   let latestIncoming = null;
-  if (field) {
+  if (field && messagesEnabled) {
     const thread = await threadForRep(ctx, ctx.rep.id);
     threadId = thread?.id || null;
     if (thread) {
@@ -167,11 +170,7 @@ async function viewStatus(ctx) {
       latestIncoming = [...messages].reverse().find((message) => message.sender_rep_id !== ctx.rep.id) || null;
     }
   } else if (admin) {
-    unread = await adminUnreadTotal(ctx);
-    if (isUuid(ctx.rep.id)) {
-      const rows = await rest(ctx.token, `messages?sender_rep_id=neq.${ctx.rep.id}&select=id,thread_id,sender_rep_id,body,created_at&order=created_at.desc&limit=1`);
-      latestIncoming = Array.isArray(rows) ? rows[0] || null : null;
-    }
+    ({ unread, latestIncoming } = await adminMessageStatus(ctx));
   }
   return {
     rep: { id: ctx.rep.id, name: ctx.rep.name, role: ctx.rep.role },
@@ -187,9 +186,14 @@ async function viewStatus(ctx) {
   };
 }
 
+async function featureAvailable(ctx, feature) {
+  try { await requireFeature(ctx.request, feature); return true; }
+  catch (error) { if (error.status === 403) return false; throw error; }
+}
+
 async function appointmentAlerts(ctx) {
   // Feature-disabled users receive no appointment data or alerts.
-  try { await requireFeature(ctx.request, 'intake'); } catch (error) { if(error.status===403)return [];throw error; }
+  if (!await featureAvailable(ctx, 'intake')) return [];
   const admin = isAdminRole(ctx.rep.role);
   const field = ctx.rep.role === 'salesperson' ? 'salesperson_id' : 'canvasser_id';
   const filter = admin ? '' : `&${field}=eq.${ctx.rep.id}`;
@@ -202,11 +206,16 @@ async function schedulingSettings(ctx) {
   return { groupme_url: rows?.[0]?.groupme_url || '' };
 }
 
-async function adminUnreadTotal(ctx) {
+async function adminMessageStatus(ctx) {
   const threads = await restAll(ctx.token, 'message_threads?select=id,rep_id,admin_last_read_at');
-  if (!threads.length) return 0;
-  const messages = await restAll(ctx.token, 'messages?select=id,thread_id,sender_rep_id,created_at&order=created_at.desc');
-  return threads.reduce((sum, thread) => sum + unreadCount(messages, thread, 'admin'), 0);
+  if (!threads.length) return { unread: 0, latestIncoming: null };
+  const messages = await restAll(ctx.token, 'messages?select=id,thread_id,sender_rep_id,body,created_at&order=created_at.desc');
+  const threadOwners = new Map(threads.map(thread => [thread.id, thread.rep_id]));
+  return {
+    unread: threads.reduce((sum, thread) => sum + unreadCount(messages, thread, 'admin'), 0),
+    // Management replies are outgoing for the management inbox, even when sent by another manager.
+    latestIncoming: messages.find(message => threadOwners.get(message.thread_id) === message.sender_rep_id) || null
+  };
 }
 
 async function viewInbox(ctx) {

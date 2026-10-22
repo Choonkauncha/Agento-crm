@@ -4,7 +4,8 @@ import { mountFeatureAdmin } from './tn-files/feature-admin.js';
 import { createClient } from "/vendor/supabase/supabase.js";
 import { atlasIcon } from "./brand/atlas-icons.js";
 import "/tn-files/password-reset.js";
-import { bindAdminTabs, adminHashTarget } from "/lib/admin-tabs.js";
+import { bindAdminTabs, adminHashTarget, activateAdminTab } from "/lib/admin-tabs.js";
+import { createDeferredAuthHandler } from "./lib/auth-events.js";
 import { managementProfile, canOpenManagement } from "/lib/account-rules.js";
 const $ = (id) => document.getElementById(id);
 let cfg,
@@ -28,6 +29,9 @@ let refreshFlight = null,
   refreshAgain = false,
   refreshTimer;
 let refreshLeadsNext = false;
+let dashboardEpoch = 0;
+let enterFlight = null;
+let enteringUserId = null;
 const changedTables = new Set();
 const viewLimits = {};
 const state = { tab: "overview", appointmentFocus: "" };
@@ -83,6 +87,19 @@ async function fetchAll(build, maxRows = Infinity) {
   return out;
 }
 function leaveAdmin() {
+  dashboardEpoch++;
+  refreshFlight = null;
+  refreshAgain = false;
+  refreshLeadsNext = false;
+  changedTables.clear();
+  me = null;
+  session = null;
+  reps = []; leads = []; appointments = []; activities = []; homes = []; territories = [];
+  index = dashboardIndex();
+  if ($('app')) $('app').hidden = true;
+  clearTimeout(refreshTimer);
+  if (adminChannel) sb?.removeChannel(adminChannel);
+  adminChannel = null;
   document.documentElement.dataset.tnAdmin = "redirect";
   location.replace("/");
 }
@@ -108,11 +125,19 @@ async function boot() {
     leaveAdmin();
     return;
   }
-  await enter(g.data.session);
-  sb.auth.onAuthStateChange((event, s) => {
-    if (event === "SIGNED_OUT") leaveAdmin();
-    else if (s && event === "SIGNED_IN") enter(s);
+  const handleAuth = createDeferredAuthHandler({
+    initialSession: g.data.session,
+    onInvalidate: () => leaveAdmin(),
+    onSession: next => {
+      if (document.documentElement.dataset.tnAdmin !== 'redirect') return enter(next);
+    },
+    onError: showDashboardError,
   });
+  sb.auth.onAuthStateChange((event, next) => {
+    // getSession above owns initial hydration; do not start the same dashboard load twice.
+    if (event !== 'INITIAL_SESSION') handleAuth(event, next);
+  });
+  await enter(g.data.session);
   $("loginForm").addEventListener("submit", login);
   bindAdminTabs(document, showTab);
   window.addEventListener("hashchange", () => {
@@ -163,8 +188,16 @@ async function login(e) {
   });
   if (r.error) $("loginError").textContent = r.error.message;
 }
-async function enter(s) {
+function enter(s) {
   session = s;
+  if (enterFlight && enteringUserId === s.user.id) return enterFlight;
+  enteringUserId = s.user.id;
+  const flight = enterFlight = enterSession(s);
+  return flight.finally(() => { if (enterFlight === flight) enterFlight = null; });
+}
+async function enterSession(s) {
+  const epoch = dashboardEpoch;
+  const isCurrent = () => epoch === dashboardEpoch && session?.user.id === s.user.id;
   const email = (s.user.email || "").toLowerCase();
   const r = await sb
     .from("reps")
@@ -172,6 +205,8 @@ async function enter(s) {
     .eq("user_id", s.user.id)
     .eq("active", true)
     .maybeSingle();
+  if (!isCurrent()) return;
+  if (r.error) throw r.error;
   const profile = managementProfile({
     email,
     rep: r.data,
@@ -196,6 +231,7 @@ async function enter(s) {
   mountSchedulingAdmin(sb,me);
   rememberAdminRole(s.user, profile.role);
   await loadData();
+  if (!isCurrent()) return;
   document.documentElement.dataset.tnAdmin = "ready";
   $("tnAdminHold")?.remove();
   $("auth").hidden = true;
@@ -215,7 +251,8 @@ async function loadData({ refreshLeads = true } = {}) {
     refreshAgain = true;
     return refreshFlight;
   }
-  refreshFlight = (async () => {
+  const epoch = dashboardEpoch;
+  const flight = refreshFlight = (async () => {
     do {
       refreshAgain = false;
       const loadLeads = refreshLeadsNext;
@@ -270,6 +307,7 @@ async function loadData({ refreshLeads = true } = {}) {
             .order("name"),
         ),
       ]);
+      if (epoch !== dashboardEpoch) return;
       [reps, leads, appointments, activities, homes, territories] = data;
       index = dashboardIndex(leads, reps);
       fillPersonFilter();
@@ -277,12 +315,12 @@ async function loadData({ refreshLeads = true } = {}) {
       const refreshed = document.getElementById("dashboardRefreshed");
       if (refreshed)
         refreshed.textContent = `Updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date())} ET`;
-    } while (refreshAgain);
+    } while (refreshAgain && epoch === dashboardEpoch);
   })();
   try {
-    await refreshFlight;
+    await flight;
   } finally {
-    refreshFlight = null;
+    if (refreshFlight === flight) refreshFlight = null;
   }
 }
 function metrics() {
@@ -600,27 +638,21 @@ function toastMsg(msg) {
   clearTimeout(window._tt);
   window._tt = setTimeout(() => el.classList.add("hidden"), 2400);
 }
-function showTab(tab) {
-  const changed = state.tab !== tab;
-  state.tab = tab;
-  if (changed) window.scrollTo({ top: 0, behavior: "instant" });
-  document.querySelectorAll("[data-tab]").forEach((b) => {
-    b.classList.toggle("active", b.dataset.tab === tab);
-    if (b.dataset.tab === tab) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  });
-  document
-    .querySelectorAll("main section[id^=tab-]")
-    .forEach((s) => s.classList.toggle("hidden", s.id !== `tab-${tab}`));
+function showTab(tab, options) {
+  if (!activateAdminTab(document, tab, options)) return false;
   renderAll();
-  if (tab !== "files") history.replaceState(null, "", `#${tab}`);
+  return true;
 }
 function applyAdminHash() {
   const target = adminHashTarget(location.hash);
-  if (!target.tab) return;
-  if (["accounts","features","scheduling"].includes(target.tab))
-    document.querySelector(`#app [data-tab="${target.tab}"]`)?.click();
-  else showTab(target.tab);
+  const tab = target.tab || 'overview';
+  if (["accounts", "features", "coach-settings", "scheduling"].includes(tab)) {
+    const button = document.querySelector(`#app [data-tab="${tab}"]`);
+    if (button) button.click();
+    else showTab('overview', { historyMode: 'replace' });
+  } else if (!showTab(tab, { historyMode: target.tab ? 'none' : 'replace' })) {
+    showTab('overview', { historyMode: 'replace' });
+  }
   if (target.messages) document.getElementById("openMessages")?.click();
 }
 function startRealtime() {
@@ -676,13 +708,14 @@ function exportCsv() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-boot().catch((error) => {
+function showDashboardError(error) {
   const hold = document.getElementById("tnAdminHold");
   if (hold) {
     hold.innerHTML = `<div class="dashboardLoadError"><h1>Dashboard could not load</h1><p>${esc(error.message || "Please try again.")}</p><button type="button" class="btn" id="retryDashboard">Try again</button><a class="btn" href="/">Field map</a></div>`;
     document.getElementById("retryDashboard").onclick = () => location.reload();
   } else toastMsg(error.message || "Dashboard could not refresh.");
-});
+}
+boot().catch(showDashboardError);
 
 // Drop deleted profiles from cached team views immediately.
 document.addEventListener("tn-account-deleted", event => {

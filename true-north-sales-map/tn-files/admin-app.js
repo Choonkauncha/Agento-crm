@@ -1,3 +1,4 @@
+import { filesHashTarget } from '../lib/admin-tabs.js';
 import { bootFiles, attachSession, hydratePhotoUrls, listTemplates, saveTemplate, listPhotos, listSubmissions, listReps, listAssignments, listIntakes, replaceAssignments, uploadLibraryFile, setDocumentReviewed, plainError } from './store.js';
 import { createDeferredAuthHandler } from '../lib/auth-events.js';
 import { esc, bindSignOut, mountSignIn, revealApp } from './ui.js';
@@ -16,6 +17,9 @@ let editor = null;
 let pendingFile = null;
 let propertyKeyOpen = '';
 let accountEpoch = 0;
+let filesReady = false;
+window.addEventListener('hashchange', () => { if (filesReady) syncFileView(); });
+document.addEventListener('tn-admin-view', event => { if (filesReady && event.detail === 'files') syncFileView(); });
 const docFilters = { query: '', type: 'all', personId: '', status: 'all' };
 
 async function boot() {
@@ -25,7 +29,7 @@ async function boot() {
   ctx.sb?.auth.onAuthStateChange(createDeferredAuthHandler({
     initialSession: ctx.session,
     onInvalidate() {
-      accountEpoch++;
+      accountEpoch++; filesReady = false;
       ctx.session = null; ctx.rep = null;
       templates = []; photos = []; submissions = []; reps = []; assignments = []; intakes = [];
       editor = null; pendingFile = null; propertyKeyOpen = '';
@@ -81,21 +85,20 @@ async function loadAndRender() {
     root.innerHTML = `<p class="tnError">${esc(error.message)}</p>`;
     return;
   }
-  const saved = sessionStorage.getItem('tn-form-editor');
-  if (location.hash === '#builder') {
-    view = 'builder';
-    if (saved) {
-      try { editor = JSON.parse(saved); } catch { editor = null; }
-    }
-  } else if (location.hash === '#library' || location.hash === '#receipts' || location.hash === '#estimates') {
-    view = 'library';
+  filesReady = true;
+  syncFileView(true);
+}
+
+function syncFileView(force = false) {
+  const target = filesHashTarget(location.hash);
+  if (!target && !force) return;
+  const next = target || { view: 'documents', propertyKey: '' };
+  const changed = view !== next.view || propertyKeyOpen !== next.propertyKey;
+  if (next.view === 'builder' && view !== 'builder' && !editor) {
+    try { editor = JSON.parse(sessionStorage.getItem('tn-form-editor') || 'null'); } catch { editor = null; }
   }
-  const propertyHash = decodeURIComponent(location.hash.replace(/^#property=/, ''));
-  if (location.hash.startsWith('#property=') && propertyHash) {
-    propertyKeyOpen = propertyHash;
-    view = 'property';
-  }
-  render();
+  view = next.view; propertyKeyOpen = next.propertyKey;
+  if (changed || force) render();
 }
 
 function allDocuments() {
@@ -116,7 +119,7 @@ function render() {
     if (view !== 'builder') editor = null;
     if (view === 'documents') propertyKeyOpen = '';
     const hash = view === 'builder' ? '#builder' : view === 'library' ? '#library' : '#files';
-    history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
+    history.pushState(null, '', `${location.pathname}${location.search}${hash}`);
     render();
   });
   if (view === 'builder') bindBuilder();
@@ -179,7 +182,7 @@ function bindDocuments() {
   root.querySelectorAll('[data-property]').forEach((button) => button.onclick = async () => {
     propertyKeyOpen = button.dataset.property;
     view = 'property';
-    history.replaceState(null, '', `${location.pathname}${location.search}#property=${encodeURIComponent(propertyKeyOpen)}`);
+    history.pushState(null, '', `${location.pathname}${location.search}#property=${encodeURIComponent(propertyKeyOpen)}`);
     render();
     const group = propertyGroups(allDocuments()).find((item) => item.key === propertyKeyOpen);
     const ids = new Set((group?.docs || []).filter((doc) => doc.source === 'photo').map((doc) => doc.sourceId));
@@ -197,7 +200,7 @@ function bindProperty() {
   document.getElementById('docBack').onclick = () => {
     view = 'documents';
     propertyKeyOpen = '';
-    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    history.pushState(null, '', `${location.pathname}${location.search}#files`);
     render();
   };
   root.querySelectorAll('[data-review]').forEach((button) => button.onclick = () => markReviewed(button));

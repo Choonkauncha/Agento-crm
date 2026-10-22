@@ -8,6 +8,11 @@ const leads=Array.from({length:100},(_,i)=>({id:`h${i}`,lat:40+i*.0001,lng:-82,a
 const clusters=clusterLeads(leads,10);assert.equal(clusters.reduce((n,c)=>n+c.leadIds.length,0),100);assert.equal(new Set(clusters.flatMap(c=>c.leadIds)).size,100);
 const plan=planTimedRoute(leads,{minutes:120,stopMinutes:5});assert.ok(plan.stops.length<=24&&plan.stops.length>=20);assert.ok(plan.travelMinutes+plan.stops.length*5<=120);
 assert.equal(planTimedRoute([],{}).stops.length,0);assert.throws(()=>planTimedRoute(leads,{minutes:0}));
+const invalidPoints=[{lat:null,lng:null},{lat:' ',lng:-82},{lat:true,lng:-82},{lat:91,lng:-82},{lat:40,lng:-181}].map((point,i)=>({id:`invalid-${i}`,...point}));
+const validPlan=planTimedRoute([...invalidPoints,...leads.slice(0,2)],{start:{lat:null,lng:null}});
+assert.equal(validPlan.available,2,'timed routes ignore houses without valid map points');
+assert.deepEqual(validPlan.stops.map(stop=>stop.id),['h0','h1']);
+assert.ok(Number.isFinite(validPlan.travelMinutes),'invalid starting location falls back to a mapped house');
 assert.equal(validateMapTool({name:'build_timed_route',args:{minutes:120}}).args.stop_minutes,5);
 for(const call of [{name:'delete_profile'},{name:'build_timed_route',args:{minutes:Infinity}},{name:'route_navigation',args:{action:'eval'}},{name:'recent_ohio_storms',args:{days:100}}])assert.throws(()=>validateMapTool(call));
 assert.ok(toolDefinitions('appointment_setter',{map:true})[0].functionDeclarations.some(t=>t.name==='recent_ohio_storms'));

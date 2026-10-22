@@ -2,6 +2,7 @@ import { geocodeLabel, geocodeUpdates } from './lib/geocode-results.js';
 import { PASSWORD_UPDATED } from './lib/password-reset.js';
 import { ROUTE_STOP_LIMIT, pickRouteStops, routeToggleLabel, visibleRoutePool } from './lib/route-picks.js';
 import { orderedRouteIds, reviseBuiltRoute, routeStopOrder, selectionOnlyChange } from './lib/route-edit.js';
+import { hasRouteCoordinates as isCoords } from './lib/route-request.js';
 import { ROUTE_PIN_COLOR, housePinAction, pinClickSlack, routeAddedMessage } from './lib/house-pin-tap.js';
 import { LOCAL_ROLE_KEY, LOCAL_USER_KEY, canAssignRoutes, clearRouteDraft, mergeAssignedRoutes, readRouteDraft, readStoredRoutes, removeAssignedRoute, routeBannerText, routeTeam, upsertAssignedRoute, visibleAssignedRoutes, writeRouteDraft, writeStoredRoutes } from './lib/assigned-routes.js';
 import { ROUTE_TRAY_KEY, routeTrayCollapsedByDefault, routeTraySummary, shouldExpandRouteTray } from './lib/route-tray.js';
@@ -72,7 +73,6 @@ let areaDraw=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const fmt=n=>Number(n||0).toLocaleString();
 const nowISO=()=>new Date().toISOString();
-const isCoords=l=>{const lat=Number(l?.lat),lng=Number(l?.lng);return l?.lat!=null&&l?.lng!=null&&Number.isFinite(lat)&&Number.isFinite(lng);};
 const leadStatus=l=>l.status||localSaved(l).status||'New';
 const leadOwnerName=l=>l.assignedRepName||(state.reps.find(r=>r.id===l.assignedRepId)?.name)||localSaved(l).owner||'';
 const localSaved=l=>JSON.parse(localStorage.getItem(`tnrc2:lead:${l.id}`)||'{}');
@@ -1798,14 +1798,21 @@ async function persistLeadPatch(l,patch){
   if('assignedRepId' in normalized){normalized.assigned_rep_id=normalized.assignedRepId;delete normalized.assignedRepId;}
   if('roofAgeYears' in normalized){normalized.roof_age_years=normalized.roofAgeYears;delete normalized.roofAgeYears;}
   if('roofAgeVerified' in normalized){normalized.roof_age_verified=normalized.roofAgeVerified;delete normalized.roofAgeVerified;}
+  const changedKeys=new Set([...Object.keys(normalized),'assignedRepId','roofAgeYears','roofAgeVerified']);
   Object.assign(l,normalized);
   l.assignedRepId=l.assigned_rep_id??l.assignedRepId??null;
   l.roofAgeYears=l.roof_age_years??l.roofAgeYears??null;
   l.roofAgeVerified=l.roof_age_verified??l.roofAgeVerified??false;
   if(state.mode==='cloud'){
     const payload={...normalized,updated_at:nowISO(),updated_by:state.currentRep.id};
-    const {error}=await state.supabase.from('leads').update(payload).eq('id',l.id);
-    if(error){Object.assign(l,original);alert(error.message);throw error;}
+    try{
+      const {error}=await state.supabase.from('leads').update(payload).eq('id',l.id);
+      if(error)throw error;
+    }catch(error){
+      for(const key of changedKeys){if(Object.prototype.hasOwnProperty.call(original,key))l[key]=original[key];else delete l[key];}
+      alert(error.message||'Could not save the field result. Please try again.');
+      throw error;
+    }
     if(normalized.status&&previous!==normalized.status){
       await logActivity(l.id,'status_changed',{from_status:previous,to_status:normalized.status});
       window.TrueNorthField?.captureDoorStatus?.({leadId:l.id,status:normalized.status});

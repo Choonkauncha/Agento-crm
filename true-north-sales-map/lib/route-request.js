@@ -8,6 +8,13 @@ function finiteCoordinate(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+/** Use the same coordinate rules for map selection and routing requests. */
+export function hasRouteCoordinates(point) {
+  const lat = finiteCoordinate(point?.lat);
+  const lng = finiteCoordinate(point?.lng);
+  return lat !== null && lng !== null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
 export function normalizeRouteRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { error: 'Send a JSON object with coordinates.' };
@@ -22,7 +29,7 @@ export function normalizeRouteRequest(body) {
     const point = body.coordinates[index];
     const lat = finiteCoordinate(point?.lat);
     const lng = finiteCoordinate(point?.lng);
-    if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    if (!hasRouteCoordinates(point)) {
       return { error: `Coordinate ${index + 1} is invalid.` };
     }
     coordinates.push({ lat, lng });

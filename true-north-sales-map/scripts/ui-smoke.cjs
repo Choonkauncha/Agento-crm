@@ -10,6 +10,7 @@ const artifacts = path.join(root, ".ui-artifacts");
 fs.mkdirSync(artifacts, { recursive: true });
 let role = "admin",
   origin;
+let debugPage;
 const userId = "22222222-2222-4222-8222-222222222222",
   repId = "11111111-1111-4111-8111-111111111111";
 const now = new Date();
@@ -144,6 +145,7 @@ db.training_assignments = [];
 db.training_reminders = [];
 let coachApi, coachLimiterFixture, coachCalls = [], liveTokenCalls = 0, coachGenerations=0, coachPostGate=null, coachGetGate=null, failNextCoachPost=false, failTrainingCompletion = false, injectCoachReply = true;
 let writes = [];
+let failedManagementRead = '';
 let switchedAccount = false, warmLeadBoot = false, gateStatusFailure = false, gateMustChange = false;
 function currentRep() {
   return {
@@ -224,7 +226,7 @@ const server = http.createServer(async (req, res) => {
       configured: true,
       url: origin,
       publishableKey: "preview-only",
-      adminEmails: ["preview-admin@example.test"],
+      adminEmails: process.env.UI_MANAGEMENT && role !== 'admin' ? [] : ["preview-admin@example.test"],
       homeownerFormUrl: origin + "/homeowner.html",
     });
   if (url.pathname.startsWith("/storage/v1/object/sign/"))
@@ -298,6 +300,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith("/rest/v1/")) {
     const name = url.pathname.split("/")[3];
+    if (req.method === 'GET' && name === failedManagementRead) {
+      return send(res, {message:'Synthetic temporary management read failure'}, 400);
+    }
     let rows = (db[name] || []).map((row) =>
       name === "reps" && row.id === currentRep().id ? currentRep() : row,
     );
@@ -406,12 +411,19 @@ const server = http.createServer(async (req, res) => {
   );
   await context.route("**/realtime/**", (route) => route.abort());
   const page = await context.newPage();
+  debugPage = page;
   async function screenshotFromTop(filename){
     await page.evaluate(()=>scrollTo(0,0));
     await page.waitForTimeout(100);
-    await page.screenshot({path:path.join(artifacts,filename),fullPage:true});
+    await page.screenshot({path:path.join(artifacts,filename),fullPage:!process.env.UI_MANAGEMENT,animations:'disabled'});
   }
   async function openManagement() {
+    const sections = page.locator('#managementSectionsToggle');
+    if (await sections.isVisible()) {
+      if (await sections.getAttribute('aria-expanded') !== 'true') await sections.click();
+      await page.locator('#managementRail').waitFor({state:'visible'});
+      return;
+    }
     await page.waitForTimeout(120); // Let the responsive collapse preference settle.
     const head = page.locator(".rail > .tnFoldBar .tnFoldHead");
     if (
@@ -515,6 +527,89 @@ const server = http.createServer(async (req, res) => {
     localStorage.setItem("sb-127-auth-token", JSON.stringify(s));
     localStorage.setItem("tn-role:" + s.user.id, "admin");
   }, session());
+  if (process.env.UI_MANAGEMENT) {
+    page.setDefaultTimeout(20000);
+    const ready = () => page.waitForFunction(()=>document.documentElement.dataset.tnAdmin==='ready');
+    async function goSection(tab) {
+      await openManagement();
+      await page.locator('#managementRail [data-tab="'+tab+'"]').click();
+      await page.locator('#tab-'+tab).waitFor({state:'visible'});
+      assert.equal(await page.locator('#managementRail [data-tab="'+tab+'"]').getAttribute('aria-current'),'page');
+    }
+    // A failed initial read must offer a recovery without exposing a partial dashboard.
+    failedManagementRead='appointments';
+    await page.goto(origin+'/admin.html');
+    await page.locator('#retryDashboard').waitFor({state:'visible'});
+    assert.ok(!(await page.locator('#app').isVisible()));
+    failedManagementRead='';
+    await page.locator('#retryDashboard').click();
+    await ready();
+    console.log('Management initial load recovery passed.');
+    assert.ok(await page.locator('#managementCurrentSection').isVisible());
+    assert.equal(await page.locator('.managementNavLabel').first().evaluate(node=>getComputedStyle(node).fontSize),'10px','Group labels keep their compact size');
+    const tabs=['overview','team','appointments','homeowners','activity','territories','files','training','accounts','features','coach-settings','scheduling'];
+    for (const width of [1440,768,390,320]) {
+      await page.setViewportSize({width,height:950});
+      for (const tab of tabs) await goSection(tab);
+      console.log('Management sections passed at '+width+'px.');
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Management fits '+width);
+      await openManagement();
+      await page.locator('#managementSectionSearch').fill('group me');
+      assert.ok(await page.locator('#managementRail [data-tab=scheduling]').isVisible());
+      assert.equal(await page.locator('#managementRail [data-tab]:visible').count(),1);
+      await page.locator('#managementSectionSearch').fill('no-such-section-987');
+      assert.ok(await page.locator('#managementNavEmpty').isVisible());
+      await page.locator('#managementSearchReset').click();
+      assert.equal(await page.locator('#managementSectionSearch').inputValue(),'');
+      if(width<=960) {
+        await page.locator('#managementSectionSearch').fill('groupme');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#managementSectionsToggle').getAttribute('aria-expanded'),'true');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#managementSectionsToggle').getAttribute('aria-expanded'),'false');
+        assert.equal(await page.evaluate(()=>document.activeElement.id),'managementSectionsToggle');
+        await openManagement();
+        await page.locator('#managementNavClose').click();
+      }
+      if(width===1440 || width===390) {
+        await goSection('overview');
+        await screenshotFromTop('management-overview-'+width+'.png');
+        if(width===390) { await openManagement();await screenshotFromTop('management-sections-mobile.png');await page.locator('#managementNavClose').click(); }
+      }
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    await goSection('team');await goSection('appointments');
+    await page.goBack();await page.locator('#tab-team').waitFor({state:'visible'});
+    await page.goForward();await page.locator('#tab-appointments').waitFor({state:'visible'});
+    for(const hash of ['%E0%A4%A','not-a-section']) {
+      await page.goto(origin+'/admin.html#'+hash);await ready();
+      await page.locator('#tab-overview').waitFor({state:'visible'});
+    }
+    for(const [tab,table,retry,input] of [
+      ['scheduling','field_settings','schedulingRetry','#groupmeUrl'],
+      ['coach-settings','coach_settings','coachSettingsRetry','#coachSystemPrompt'],
+      ['features','feature_permissions','featureRetry','#featureControls input']
+    ]) {
+      failedManagementRead=table;
+      await page.goto(origin+'/admin.html#'+tab);await ready();
+      await page.locator('#'+retry).waitFor({state:'visible'});
+      failedManagementRead='';
+      await page.locator('#'+retry).click();
+      await page.waitForFunction(id=>document.getElementById(id).hidden,retry);
+      await page.locator(input).first().waitFor({state:'visible'});
+      assert.equal(await page.locator(input).first().isDisabled(),false);
+    }
+    await goSection('scheduling');await screenshotFromTop('management-groupme-desktop.png');
+    for(const nextRole of ['manager','appointment_setter','salesperson']) {
+      role=nextRole;
+      await page.goto(origin+'/admin.html?fixtureRole='+nextRole+'#accounts');
+      await page.waitForURL(url=>!url.pathname.startsWith('/admin'));
+      assert.equal(await page.locator('#app.dashboardShell').count(),0,'Management blocked for '+nextRole);
+    }
+    assert.deepEqual(errors,[]);
+    console.log('Management sections, mobile drawer, search, history, deep links, failure recovery and role restriction passed.');
+    await browser.close();server.close();return;
+  }
   if(process.env.UI_ASSISTANT){
     page.setDefaultTimeout(20000);
     await context.grantPermissions(['microphone','geolocation']);
@@ -1423,7 +1518,11 @@ const server = http.createServer(async (req, res) => {
   console.log("UI smoke passed. Screenshots: " + artifacts);
   await browser.close();
   server.close();
-})().catch((error) => {
+})().catch(async (error) => {
+  if (process.env.UI_MANAGEMENT && debugPage) {
+    await debugPage.screenshot({path:path.join(artifacts,'management-failure.png'),fullPage:true}).catch(()=>{});
+    console.error(await debugPage.evaluate(()=>({url:location.href,admin:document.documentElement.dataset.tnAdmin,hold:document.getElementById('tnAdminHold')?.innerText})).catch(()=>null));
+  }
   console.error(error);
   process.exit(1);
 });

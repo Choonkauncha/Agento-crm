@@ -14,9 +14,19 @@ export function featureAllowed(rows,role,key){
 }
 export async function requireFeature(request,key,{env=process.env,fetchImpl=fetch}={}){
   const token=request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if(!token)throw Object.assign(Error('Sign in required.'),{status:401,public:true});
-  const base=(env.SUPABASE_URL||'').replace(/\/$/,'');
-  const response=await fetchImpl(`${base}/rest/v1/rpc/feature_enabled`,{method:'POST',headers:{apikey:env.SUPABASE_PUBLISHABLE_KEY||env.SUPABASE_ANON_KEY,Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({requested:key})});
-  if(!response.ok)throw Object.assign(Error('Feature access could not be verified.'),{status:503,public:true});
-  if(await response.json()!==true)throw Object.assign(Error('Management has disabled this feature for your role.'),{status:403,public:true});
+  const fail=(message,status)=>Object.assign(Error(message),{status,public:true});
+  if(!token)throw fail('Sign in required.',401);
+  const base=String(env.SUPABASE_URL||'').replace(/\/$/,'');
+  const apikey=env.SUPABASE_PUBLISHABLE_KEY||env.SUPABASE_ANON_KEY;
+  const unavailable=()=>fail('Feature access could not be verified. Try again.',503);
+  if(!base||!apikey)throw unavailable();
+  let response;
+  try{
+    response=await fetchImpl(`${base}/rest/v1/rpc/feature_enabled`,{method:'POST',headers:{apikey,Authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({requested:key}),signal:AbortSignal.timeout(12000)});
+  }catch{throw unavailable();}
+  if(!response.ok)throw unavailable();
+  let enabled;
+  try{enabled=await response.json();}catch{throw unavailable();}
+  if(typeof enabled!=='boolean')throw unavailable();
+  if(!enabled)throw fail('Management has disabled this feature for your role.',403);
 }

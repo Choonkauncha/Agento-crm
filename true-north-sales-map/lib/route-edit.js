@@ -1,8 +1,6 @@
-/** Keep a built route when houses are added or removed after optimization. */
+import { hasRouteCoordinates } from './route-request.js';
 
-function hasCoords(lead) {
-  return Number.isFinite(Number(lead?.lat)) && Number.isFinite(Number(lead?.lng));
-}
+/** Keep a built route when houses are added or removed after optimization. */
 
 export function routeKeyParts(key) {
   const text = String(key || '');
@@ -32,7 +30,7 @@ export function reviseBuiltRoute(stops, selectedIds, leadsById) {
   for (const id of selected) {
     if (have.has(id)) continue;
     const lead = leadsById?.get?.(id);
-    if (!hasCoords(lead)) continue;
+    if (!hasRouteCoordinates(lead)) continue;
     added.push(lead);
     have.add(id);
   }

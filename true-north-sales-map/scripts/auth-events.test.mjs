@@ -53,6 +53,7 @@ const cloudSource = source.slice(source.indexOf('async function enterCloud('), s
 const element = { textContent: '', className: '', hidden: false, classList: { add() {}, remove() {}, toggle() {} } };
 const pending = new Map();
 const fallback = [];
+const assistantAccounts = [];
 const state = { user: null, cloudReady: false, map: {}, config: {url:'project'}, pendingPostSignIn: false,
   supabase: {
     auth:{getUser:async token=>({data:{user:session(token.replace('token-','')).user}})},
@@ -65,6 +66,8 @@ const context = vm.createContext({
   $: () => element, showLogin() { fallback.push('login'); }, hideLogin() {}, initMapOnce() {}, deferFieldTools() {}, settleMapLoader() {},
   canOpenManagement: () => false, rememberRole() {}, localStorage: {}, showPostSignIn() {},
   startRealtime() {}, updatePinBanner() {}, publishSideData() {},
+  registerMapAssistant: () => assistantAccounts.push(state.user.id), mapAssistantContext() {}, executeMapAssistantAction() {},
+  runPendingAssistantCommand: async () => {},
   loadSideData: async () => {},
   loadLeadBundle: current => new Promise((resolve, reject) => pending.set(state.user.id, { resolve, reject, current })),
   enterLocal: message => fallback.push(message)
@@ -84,6 +87,7 @@ pending.get('B').resolve();
 await second;
 assert.equal(state.user.id, 'B');
 assert.equal(state.cloudReady, true);
+assert.deepEqual(assistantAccounts, ['A', 'B'], 'each account initializes its own map assistant');
 assert.equal(context.flight(), null);
 
 const bundleSource = source.slice(source.indexOf('async function loadLeadBundle('), source.indexOf('function publishSideData('));
