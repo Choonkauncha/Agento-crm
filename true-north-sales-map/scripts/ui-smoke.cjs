@@ -255,6 +255,7 @@ const server = http.createServer(async (req, res) => {
       rep: currentRep(),
       isField: ["appointment_setter", "salesperson"].includes(role),
       isAdmin: ["admin", "manager"].includes(role),
+      canClockIn: ["admin", "manager", "appointment_setter", "salesperson"].includes(role),
       openShift: null,
       consent: { consented_at: isoHours(-24) },
       unread: 0,
@@ -546,14 +547,20 @@ const server = http.createServer(async (req, res) => {
     await ready();
     console.log('Management initial load recovery passed.');
     assert.ok(await page.locator('#managementCurrentSection').isVisible());
+    assert.equal(await page.locator('.workspaceMenuBtn, #workspaceNav').count(),0,'Management has one navigation system');
+    assert.equal(await page.locator('.tnHeader #managementSectionsToggle').count(),1,'Sections occupies the header menu position');
+    assert.equal(await page.locator('.managementQuickAction, .managementLocation a[href="/setter.html"]').count(),0,'No standalone inspection action');
+    assert.equal(await page.locator('#managementRail a[href="/setter.html"]').count(),1,'Booking remains in Sections');
     assert.equal(await page.locator('.managementNavLabel').first().evaluate(node=>getComputedStyle(node).fontSize),'10px','Group labels keep their compact size');
     const tabs=['overview','team','appointments','homeowners','activity','territories','files','training','accounts','features','coach-settings','scheduling'];
-    for (const width of [1440,768,390,320]) {
+    for (const width of [1440,1024,768,390,320]) {
       await page.setViewportSize({width,height:950});
       for (const tab of tabs) await goSection(tab);
       console.log('Management sections passed at '+width+'px.');
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Management fits '+width);
       await openManagement();
+      await page.locator('#managementSectionSearch').fill('book inspection');
+      assert.ok(await page.locator('#managementRail [data-management-link="book-inspection"]').isVisible());
       await page.locator('#managementSectionSearch').fill('group me');
       assert.ok(await page.locator('#managementRail [data-tab=scheduling]').isVisible());
       assert.equal(await page.locator('#managementRail [data-tab]:visible').count(),1);
@@ -561,7 +568,7 @@ const server = http.createServer(async (req, res) => {
       assert.ok(await page.locator('#managementNavEmpty').isVisible());
       await page.locator('#managementSearchReset').click();
       assert.equal(await page.locator('#managementSectionSearch').inputValue(),'');
-      if(width<=960) {
+      if(width<=1100) {
         await page.locator('#managementSectionSearch').fill('groupme');
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#managementSectionsToggle').getAttribute('aria-expanded'),'true');
@@ -597,6 +604,7 @@ const server = http.createServer(async (req, res) => {
       await page.locator('#'+retry).click();
       await page.waitForFunction(id=>document.getElementById(id).hidden,retry);
       await page.locator(input).first().waitFor({state:'visible'});
+      await page.waitForFunction(selector => document.querySelector(selector)?.disabled === false, input);
       assert.equal(await page.locator(input).first().isDisabled(),false);
     }
     await goSection('scheduling');await screenshotFromTop('management-groupme-desktop.png');

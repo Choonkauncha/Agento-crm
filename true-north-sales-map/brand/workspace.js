@@ -40,6 +40,8 @@ bootFeatureAccess();
 function mountNavigation() {
   const header = document.querySelector(".topbar, .tnHeader");
   if (!header) return;
+  // Management owns one Sections menu with its field and account destinations.
+  if (isAdmin) return;
   const nav = document.createElement("nav");
   nav.id = "workspaceNav";
   nav.className = "workspaceNav";
