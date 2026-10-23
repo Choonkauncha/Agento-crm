@@ -250,26 +250,29 @@ async function loadConfig() {
   }
 }
 
-async function api(path, { method = 'GET', body, retried = false } = {}) {
+async function api(path, { method = 'GET', body, retried = false, signal } = {}) {
   const headers = { 'content-type': 'application/json' };
   if (state.token) headers.authorization = `Bearer ${state.token}`;
   const response = await fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal
   });
   const data = await response.json().catch(() => ({}));
+  if (signal?.aborted) throw Object.assign(new Error('Request cancelled.'), { name: 'AbortError' });
   if (response.status === 401 && !retried) {
     const stored = readStoredSession();
     if (stored?.access_token && stored.access_token !== state.token) {
       state.token = stored.access_token;
-      return api(path, { method, body, retried: true });
+      return api(path, { method, body, retried: true, signal });
     }
     if (state.sb) {
       const refreshed = await state.sb.auth.refreshSession();
       if (refreshed.data?.session) {
+        if (signal?.aborted) throw Object.assign(new Error('Request cancelled.'), { name: 'AbortError' });
         state.token = refreshed.data.session.access_token;
-        return api(path, { method, body, retried: true });
+        return api(path, { method, body, retried: true, signal });
       }
     }
   }
@@ -288,59 +291,183 @@ function geolocate({required=false}={}) {
   return required?pending:pending.catch(()=>null);
 }
 
+function canClockIn(status = state.status) {
+  return Boolean(status?.canClockIn ?? status?.isField);
+}
+
+function updateLocationStatus(message) {
+  state.locationStatus = message;
+  const node = document.getElementById('tnGpsStatus');
+  if (node) {
+    node.hidden = !state.status?.openShift;
+    node.textContent = message || 'GPS waiting for a fresh fix';
+    node.title = 'Location is shared only while clocked in. Keep the app visible for updates. Tap to retry GPS.';
+  }
+}
+
 function stopLocationSharing() {
-  if(state.locationWatch !== null) navigator.geolocation?.clearWatch(state.locationWatch);
-  clearInterval(state.locationTimer);state.locationTimer=null;state.locationGeneration=(state.locationGeneration||0)+1;
-  state.locationWatch=null;state.locationShift=null;state.locationSentAt=0;state.locationLatest=null;state.locationSampling=false;
+  if (state.locationWatch !== null) navigator.geolocation?.clearWatch(state.locationWatch);
+  clearInterval(state.locationTimer);
+  state.locationAbort?.abort();
+  state.locationAbort = null;
+  state.locationTimer = null;
+  state.locationGeneration = (state.locationGeneration || 0) + 1;
+  state.locationWatch = null;
+  state.locationShift = null;
+  state.locationSentAt = 0;
+  state.locationLastCaptured = 0;
+  state.locationLatest = null;
+  state.locationSampling = false;
+  state.locationSending = false;
 }
 function syncLocationSharing() {
-  const shift=state.status?.openShift;
-  if(!state.token || !state.status?.isField || !shift){stopLocationSharing();return;}
-  if(state.status.consent?.notice_version !== NOTICE_VERSION){
+  const shift = state.status?.openShift;
+  if (state.clockBusy) { stopLocationSharing(); return; }
+  if (!state.token || !canClockIn() || !shift) {
     stopLocationSharing();
-    if(!state.consentBusy){
-      state.consentBusy=true;
-      const token=state.token;
-      askConsent().then(()=>api('/api/field',{method:'POST',body:{action:'consent'}})).then(result=>{
-        if(state.token===token && state.status){state.status.consent=result.consent;syncLocationSharing();}
-      }).catch(error=>toast(error.message)).finally(()=>{state.consentBusy=false;});
+    state.locationBlocked = false;
+    updateLocationStatus('');
+    return;
+  }
+  if (document.hidden) {
+    stopLocationSharing();
+    updateLocationStatus('GPS paused while app is hidden');
+    return;
+  }
+  if (state.locationBlocked) {
+    updateLocationStatus('GPS permission blocked — tap to retry');
+    return;
+  }
+  if (state.status.consent?.notice_version !== NOTICE_VERSION) {
+    stopLocationSharing();
+    if (!state.consentBusy) {
+      state.consentBusy = true;
+      const token = state.token;
+      askConsent().then(() => {
+        if (state.token !== token || state.status?.openShift?.id !== shift.id) return null;
+        return api('/api/field', { method: 'POST', body: { action: 'consent' } });
+      }).then(result => {
+        if (result && state.token === token && state.status?.openShift?.id === shift.id) {
+          state.status.consent = result.consent;
+          syncLocationSharing();
+        }
+      }).catch(error => toast(error.message)).finally(() => { state.consentBusy = false; });
     }
     return;
   }
-  if(state.locationShift===shift.id || !navigator.geolocation) return;
-  stopLocationSharing();state.locationShift=shift.id;
-  const generation=state.locationGeneration;
-  const sendPosition=async position=>{
-    if(!state.token || state.status?.openShift?.id!==shift.id || state.locationSending || generation!==state.locationGeneration) return;
-    state.locationSending=true;
-    try {
-      await api('/api/field',{method:'POST',body:{action:'location',shiftId:shift.id,lat:position.coords.latitude,lng:position.coords.longitude,accuracy:position.coords.accuracy}});
-      state.locationSentAt=Date.now();state.locationWarned=false;
-    } catch(error) {
-      if(!state.locationWarned){state.locationWarned=true;toast('Location sharing paused: '+error.message);}
-      if(error.status===409) stopLocationSharing();
-    } finally {state.locationSending=false;}
+  if (state.locationShift === shift.id) return;
+  if (!navigator.geolocation) {
+    updateLocationStatus('GPS unavailable on this device');
+    return;
+  }
+  stopLocationSharing();
+  state.locationShift = shift.id;
+  updateLocationStatus('GPS waiting for a fresh fix');
+  const generation = state.locationGeneration;
+  const active = () => Boolean(state.token) && state.status?.openShift?.id === shift.id
+    && generation === state.locationGeneration && !document.hidden;
+  const fresh = position => {
+    const timestamp = Number(position?.timestamp);
+    const age = Date.now() - timestamp;
+    const coords = position?.coords;
+    return Number.isFinite(timestamp) && timestamp > 0 && age >= -5000 && age <= 15000
+      && Number.isFinite(coords?.latitude) && Math.abs(coords.latitude) <= 90
+      && Number.isFinite(coords?.longitude) && Math.abs(coords.longitude) <= 180
+      && Number.isFinite(coords?.accuracy) && coords.accuracy >= 0;
   };
-  state.locationWatch=navigator.geolocation.watchPosition(position=>{
-    if(generation!==state.locationGeneration)return;
-    state.locationLatest={position,receivedAt:Date.now()};
-    if(!state.locationSentAt)sendPosition(position);
-  },error=>{
-    if(error?.code===1){stopLocationSharing();}
-    if(!state.locationWarned){state.locationWarned=true;toast(locationAccessMessage(error));}
-  },{enableHighAccuracy:true,maximumAge:5000,timeout:25000});
-  state.locationTimer=setInterval(()=>{
-    if(state.locationSampling||state.locationSending||generation!==state.locationGeneration)return;
-    if(state.locationLatest && Date.now()-state.locationLatest.receivedAt<=15000){sendPosition(state.locationLatest.position);return;}
-    state.locationSampling=true;
-    navigator.geolocation.getCurrentPosition(position=>{
-      if(generation!==state.locationGeneration)return;
-      state.locationSampling=false;state.locationLatest={position,receivedAt:Date.now()};sendPosition(position);
-    },()=>{if(generation===state.locationGeneration)state.locationSampling=false;},{enableHighAccuracy:false,maximumAge:5000,timeout:15000});
-  },5000);
+  const reportError = error => {
+    if (!active()) return;
+    if (error?.code === 1) {
+      state.locationBlocked = true;
+      stopLocationSharing();
+      updateLocationStatus('GPS permission blocked — tap to retry');
+    } else updateLocationStatus('GPS paused — waiting for a fresh fix');
+    if (!state.locationWarned) {
+      state.locationWarned = true;
+      toast(locationAccessMessage(error));
+    }
+  };
+  const sendPosition = async position => {
+    if (!active() || state.locationSending || !fresh(position)) return;
+    const captured = Number(position.timestamp);
+    if (captured <= (state.locationLastCaptured || 0)) return;
+    const controller = new AbortController();
+    state.locationAbort = controller;
+    state.locationSending = true;
+    try {
+      await api('/api/field', { method: 'POST', signal: controller.signal, body: {
+        action: 'location', shiftId: shift.id,
+        lat: position.coords.latitude, lng: position.coords.longitude,
+        accuracy: position.coords.accuracy, capturedAt: new Date(captured).toISOString()
+      } });
+      if (!active()) return;
+      state.locationSentAt = Date.now();
+      state.locationLastCaptured = captured;
+      state.locationWarned = false;
+      updateLocationStatus(position.coords.accuracy <= 25
+        ? `GPS active · ±${Math.round(position.coords.accuracy)} m`
+        : `GPS low accuracy · ±${Math.round(position.coords.accuracy)} m`);
+    } catch (error) {
+      if (!active() || error.name === 'AbortError') return;
+      updateLocationStatus('GPS upload paused — tap to retry');
+      if (!state.locationWarned) {
+        state.locationWarned = true;
+        toast('Location sharing paused: ' + error.message);
+      }
+      if (error.status === 409) stopLocationSharing();
+    } finally {
+      if (generation === state.locationGeneration) {
+        state.locationSending = false;
+        state.locationAbort = null;
+      }
+    }
+  };
+  const receive = position => {
+    if (!active()) return;
+    if (!fresh(position)) {
+      updateLocationStatus('GPS paused — waiting for a fresh fix');
+      return;
+    }
+    state.locationLatest = position;
+    if (!state.locationSentAt || Date.now() - state.locationSentAt >= 5000) sendPosition(position);
+  };
+  try {
+    state.locationWatch = navigator.geolocation.watchPosition(receive, reportError,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    if (!active()) {
+      navigator.geolocation.clearWatch(state.locationWatch);
+      state.locationWatch = null;
+      return;
+    }
+  } catch (error) { reportError(error); return; }
+  // A fresh acquisition also captures stationary visits without replaying old fixes.
+  state.locationTimer = setInterval(() => {
+    if (!active() || state.locationSampling || state.locationSending) return;
+    if (state.locationLatest && fresh(state.locationLatest)
+      && state.locationLatest.timestamp > (state.locationLastCaptured || 0)) {
+      sendPosition(state.locationLatest);
+      return;
+    }
+    if (state.locationSentAt && Date.now() - state.locationSentAt > 15000) {
+      updateLocationStatus('GPS paused — waiting for a fresh fix');
+    }
+    state.locationSampling = true;
+    try {
+      navigator.geolocation.getCurrentPosition(position => {
+        if (!active()) return;
+        state.locationSampling = false;
+        receive(position);
+      }, error => {
+        if (!active()) return;
+        state.locationSampling = false;
+        reportError(error);
+      }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    } catch (error) { state.locationSampling = false; reportError(error); }
+  }, 5000);
 }
-window.addEventListener('pagehide',stopLocationSharing);
-window.addEventListener('pageshow',()=>syncLocationSharing());
+window.addEventListener('pagehide', stopLocationSharing);
+window.addEventListener('pageshow', () => syncLocationSharing());
+document.addEventListener('visibilitychange', () => syncLocationSharing());
 
 function hostForWidget() {
   return document.querySelector('#topRight, .topRight, .headerLinks');
@@ -719,6 +846,7 @@ function mountWidget() {
       <span id="tnClockLabel">Clock In</span>
       <span id="tnClockTimer" hidden></span>
     </button>
+    <button type="button" id="tnGpsStatus" class="tnShiftsLink" hidden aria-live="polite"></button>
     <button type="button" id="tnMsgBtn" class="tnMsgBtn" aria-haspopup="dialog">
       Messages
       <span id="tnUnread" class="tnBadge hidden">0</span>
@@ -727,6 +855,11 @@ function mountWidget() {
   host.prepend(wrap);
   placeFieldOps(wrap);
   document.getElementById('tnClockBtn').onclick = onClock;
+  document.getElementById('tnGpsStatus').onclick = () => {
+    state.locationBlocked = false;
+    stopLocationSharing();
+    syncLocationSharing();
+  };
   document.getElementById('tnMsgBtn').onclick = () => { state.msgOpen ? closeMessages() : openMessages(); };
   syncMobileChrome();
 }
@@ -740,7 +873,8 @@ function renderWidget() {
   const clock = document.getElementById('tnClockBtn');
   const messages = document.getElementById('tnMsgBtn');
   const shifts = document.getElementById('tnShiftsLink');
-  clock.hidden = !status.isField;
+  clock.hidden = !canClockIn(status);
+  updateLocationStatus(state.locationStatus);
   const inWorkMenu = root.parentElement?.id === 'tnMoreMenu';
   messages.hidden = inWorkMenu || !(status.isField || status.isAdmin);
   shifts.hidden = inWorkMenu || !status.isAdmin || onShifts;
@@ -797,7 +931,7 @@ function setClockBusy(label) {
 }
 
 function widgetStatusKey(status){
-  return JSON.stringify([status?.rep?.id,status?.rep?.role,status?.isField,status?.isAdmin,status?.openShift?.id,status?.unread]);
+  return JSON.stringify([status?.rep?.id,status?.rep?.role,status?.isField,status?.isAdmin,status?.canClockIn,status?.openShift?.id,status?.unread]);
 }
 async function refreshStatus() {
   if (!state.token) return;
@@ -838,7 +972,7 @@ function askConsent({requestLocation=false}={}) {
 }
 
 async function onClock() {
-  if (!state.status?.isField || state.clockBusy) return;
+  if (!canClockIn() || state.clockBusy) return;
   try {
     if (state.status.openShift) await doClockOut();
     else await doClockIn();
@@ -846,6 +980,7 @@ async function onClock() {
     toast(error.message || 'Clock update failed.');
   } finally {
     state.clockBusy = false;
+    syncLocationSharing();
     renderWidget();
   }
 }
@@ -873,6 +1008,8 @@ async function doClockIn() {
 }
 
 async function doClockOut() {
+  stopLocationSharing();
+  updateLocationStatus('GPS stopped while clocking out');
   setClockBusy('Clocking out…');
   const loc = await geolocate();
   if (!loc) toast('Clocked out without a location.');
@@ -1132,8 +1269,10 @@ async function bootWidget() {
 async function captureDoorStatusNow(info) {
   try {
     await ready;
-    if (!state.status?.isField || !state.status?.openShift) return { skipped: true };
+    if (!canClockIn() || !state.status?.openShift) return { skipped: true };
+    const shiftId = state.status.openShift.id;
     const loc = await geolocate();
+    if (!state.token || state.clockBusy || state.status?.openShift?.id !== shiftId) return { skipped: true };
     if (!loc) {
       if (!state.locationWarned) {
         state.locationWarned = true;
@@ -1271,6 +1410,7 @@ async function enterShifts(session) {
   clearInterval(state.ticker);
   state.shifts = null;
   state.status = null;
+  stopLocationSharing();
   const userId = session?.user?.id || null;
   if (!userId || userId !== shiftsUserId) {
     state.selectedRepId = null;
@@ -1293,6 +1433,7 @@ async function enterShifts(session) {
     const status = await api('/api/field?view=status');
     if (stale()) return;
     state.status = status;
+    syncLocationSharing();
     watchIncoming(state.status);
     ensureRealtime().catch(() => {});
   } catch (error) {

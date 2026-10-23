@@ -13,6 +13,7 @@ export const MANAGEMENT_DESTINATIONS = {
   activity: { group: 'daily', label: 'Activity feed', description: 'Review field actions and inspection handoffs across the team.', keywords: 'audit trail reports history all events status changes' },
   messages: { group: 'daily', label: 'Messages', description: 'Conversations between management and field staff.', keywords: 'inbox chat employee office' },
   shifts: { group: 'daily', label: 'Shifts', description: 'Clock-in activity and shared field locations.', keywords: 'attendance clock time location travel' },
+  'users-gps': { group: 'people', label: 'Users GPS', description: 'Review clocked-in locations and estimated time at each house.', keywords: 'gps users houses dwell visit time location tracking staff admins' },
   team: { group: 'people', label: 'Team activity', description: 'See how each teammate is doing in the field.', keywords: 'team roles roster staff employees performance' },
   accounts: { group: 'people', label: 'Accounts', description: 'Manage logins, passwords, access, and archived accounts.', keywords: 'users create employee password reset delete archive' },
   territories: { group: 'people', label: 'Territories', description: 'See who is responsible for each field area.', keywords: 'coverage area neighborhood ownership assignment' },
