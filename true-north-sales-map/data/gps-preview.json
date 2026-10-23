@@ -1,0 +1,117 @@
+{
+  "source": "preview",
+  "label": "Preview visits",
+  "description": "Simulated house visits at verified real addresses. These are not recorded employee movements.",
+  "verified_at": "2026-10-23",
+  "coordinate_source": "Existing map data/leads.json geocodes; address existence checked against public residential listings. Coordinates have not been independently surveyed.",
+  "visits": [
+    {
+      "id": "preview-visit-1",
+      "source": "preview",
+      "lead_id": "csv-159458971",
+      "address": "1051 YORKWOOD RD, Mansfield, OH 44907-2434",
+      "lat": 40.7301027,
+      "lng": -82.5254566,
+      "arrived_at": "2026-10-23T13:00:00-04:00",
+      "departed_at": "2026-10-23T13:07:00-04:00",
+      "duration_seconds": 420,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/1051-Yorkwood-Rd-44907/home/126334072",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
+    {
+      "id": "preview-visit-2",
+      "source": "preview",
+      "lead_id": "csv-158242739",
+      "address": "850 ARLINGTON AVE, Mansfield, OH 44903-7020",
+      "lat": 40.7513908,
+      "lng": -82.54709,
+      "arrived_at": "2026-10-23T13:18:00-04:00",
+      "departed_at": "2026-10-23T13:29:00-04:00",
+      "duration_seconds": 660,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/850-Arlington-Ave-44903/home/126246452",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
+    {
+      "id": "preview-visit-3",
+      "source": "preview",
+      "lead_id": "csv-156819558",
+      "address": "98 PARKWOOD BLVD, Mansfield, OH 44906-3218",
+      "lat": 40.756602,
+      "lng": -82.5391833,
+      "arrived_at": "2026-10-23T13:34:00-04:00",
+      "departed_at": "2026-10-23T13:39:00-04:00",
+      "duration_seconds": 300,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.zillow.com/homedetails/98-Parkwood-Blvd-Mansfield-OH-44906/86610360_zpid/",
+        "evidence": "Zillow SingleFamily property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
+    {
+      "id": "preview-visit-4",
+      "source": "preview",
+      "lead_id": "csv-154805610",
+      "address": "121 PARKWOOD BLVD, Mansfield, OH 44906-3217",
+      "lat": 40.756159,
+      "lng": -82.5390415,
+      "arrived_at": "2026-10-23T13:42:00-04:00",
+      "departed_at": "2026-10-23T13:51:00-04:00",
+      "duration_seconds": 540,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.zillow.com/homedetails/121-Parkwood-Blvd-Mansfield-OH-44906/86611300_zpid/",
+        "evidence": "Zillow SingleFamily property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
+    {
+      "id": "preview-visit-5",
+      "source": "preview",
+      "lead_id": "csv-157769308",
+      "address": "836 PEACEFUL PATH, Mansfield, OH 44907-2022",
+      "lat": 40.7370016,
+      "lng": -82.519611,
+      "arrived_at": "2026-10-23T14:08:00-04:00",
+      "departed_at": "2026-10-23T14:21:00-04:00",
+      "duration_seconds": 780,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/836-Peaceful-Path-44907/home/126500948",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
+    {
+      "id": "preview-visit-6",
+      "source": "preview",
+      "lead_id": "csv-155222424",
+      "address": "2699 LEXINGTON STEAM CORNERS RD, Lexington, OH 44904-8610",
+      "lat": 40.6803959,
+      "lng": -82.6101311,
+      "arrived_at": "2026-10-23T14:45:00-04:00",
+      "departed_at": "2026-10-23T14:53:00-04:00",
+      "duration_seconds": 480,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.zillow.com/homedetails/2699-Lexington-Steam-Corners-Rd-Lexington-OH-44904/86630405_zpid/",
+        "evidence": "Zillow SingleFamily property page",
+        "existing_geocode_match": "Exact"
+      }
+    }
+  ]
+}

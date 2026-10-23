@@ -1,6 +1,8 @@
 import { appointmentAudience } from '../lib/scheduling.js';
 import { requirePasswordReady } from '../lib/server-access.js';
 import { requireFeature } from '../lib/features.js';
+import { readFile } from 'node:fs/promises';
+import { currentGpsLocation, summarizeGpsVisits } from '../lib/gps-visits.js';
 import {
   ADMIN_ROLES,
   FIELD_ROLES,
@@ -155,7 +157,7 @@ async function viewStatus(ctx) {
   const admin = isAdminRole(ctx.rep.role);
   const [shiftsEnabled, messagesEnabled] = field
     ? await Promise.all(['shifts', 'messages'].map(feature => featureAvailable(ctx, feature)))
-    : [false, admin];
+    : [admin, admin];
   const consent = shiftsEnabled ? await consentRow(ctx) : null;
   const shift = shiftsEnabled ? await openShift(ctx) : null;
   let unread = 0;
@@ -176,6 +178,7 @@ async function viewStatus(ctx) {
     rep: { id: ctx.rep.id, name: ctx.rep.name, role: ctx.rep.role },
     isField: field,
     isAdmin: admin,
+    canClockIn: shiftsEnabled && (field || admin),
     notice: { version: NOTICE_VERSION, text: NOTICE_TEXT },
     consent: consent ? { consented_at: consent.consented_at, notice_version: consent.notice_version } : null,
     openShift: shift,
@@ -299,7 +302,54 @@ async function viewShifts(ctx, url) {
   return { date, timeZone, dayStart: startIso, dayEnd: endIso, ...summary };
 }
 
-async function insertPoint(ctx, { shiftId, coord, accuracy, kind, leadId, doorStatus }) {
+async function viewGps(ctx, url) {
+  if (!isAdminRole(ctx.rep.role)) throw fail('Users GPS is for management.', 403);
+  const date = url.searchParams.get('date') || easternToday();
+  if (!isIsoDate(date)) throw fail('Use a YYYY-MM-DD date.', 400);
+  const selectedRepId = url.searchParams.get('repId') || null;
+  if (selectedRepId && !isUuid(selectedRepId)) throw fail('Choose a valid person.', 400);
+  const { start, end, timeZone } = easternDayBounds(date);
+  const now = new Date();
+  const reps = await restAll(ctx.token, 'reps?select=id,name,role,active&active=eq.true&order=name.asc');
+  if (selectedRepId && !reps.some(rep => rep.id === selectedRepId)) throw fail('Active team member not found.', 404);
+  const shifts = await restAll(ctx.token, `shifts?select=id,rep_id,clock_in_at,clock_out_at&clock_in_at=lt.${encodeURIComponent(quotedTime(end.toISOString()))}&or=${encodeURIComponent(`(clock_out_at.is.null,clock_out_at.gte.${quotedTime(start.toISOString())})`)}&order=clock_in_at.asc`);
+  const previewRepId = reps.find(rep => rep.role === 'admin' && (process.env.GPS_PREVIEW_REP_ID ? rep.id === process.env.GPS_PREVIEW_REP_ID : String(rep.name).trim().toLowerCase() === 'travis mackie'))?.id || null;
+  const preview = url.searchParams.get('preview') === 'true';
+  if (preview && (!selectedRepId || selectedRepId !== previewRepId)) throw fail('Example visits are only available for the configured admin.', 400);
+  const people = reps.map(rep => ({ rep, shifts: shifts.filter(s => s.rep_id === rep.id), points: [], visits: [], gaps: [], liveLocation: null, previewAvailable: rep.id === previewRepId }));
+  const selected = people.find(person => person.rep.id === selectedRepId);
+  if (selected) {
+    // Per-user paging avoids silently truncating a team day at the API row limit.
+    const pointPath = `location_points?select=id,rep_id,shift_id,lat,lng,captured_at,kind,lead_id,door_status,accuracy_m&rep_id=eq.${selectedRepId}&captured_at=gte.${encodeURIComponent(quotedTime(start.toISOString()))}&captured_at=lt.${encodeURIComponent(quotedTime(end.toISOString()))}&order=captured_at.asc,id.asc`;
+    const points = await restAll(ctx.token, pointPath);
+    if (points.length >= 20000) throw fail('This day has too many GPS readings. Choose a different date or contact management to export the full history.', 422, 'GPS_HISTORY_LIMIT');
+    selected.points = points.filter(p => selected.shifts.some(s => s.id === p.shift_id && s.rep_id === p.rep_id && +new Date(p.captured_at) >= +new Date(s.clock_in_at) && (!s.clock_out_at || +new Date(p.captured_at) <= +new Date(s.clock_out_at))));
+    let leads = [];
+    const positioned = selected.points.filter(p => p.lat != null && p.lng != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
+    if (positioned.length) {
+      const lats = positioned.map(p => Number(p.lat)), lngs = positioned.map(p => Number(p.lng));
+      const leadPath = `leads?select=id,address,full_address,city,state,zip,lat,lng&lat=gte.${Math.min(...lats)-0.001}&lat=lte.${Math.max(...lats)+0.001}&lng=gte.${Math.min(...lngs)-0.001}&lng=lte.${Math.max(...lngs)+0.001}&order=id.asc`;
+      leads = await restAll(ctx.token, leadPath);
+      if (leads.length >= 20000) throw fail('The GPS area contains too many houses to match reliably.', 422);
+    }
+    Object.assign(selected, summarizeGpsVisits({ points: selected.points, shifts: selected.shifts, leads, dayStart: start, dayEnd: end, now }));
+    selected.liveLocation = currentGpsLocation(selected.points, selected.shifts, now);
+  }
+  // Roster only needs the most recent point, not every five-second sample.
+  await Promise.all(people.filter(person => person !== selected && person.shifts.some(s => !s.clock_out_at)).map(async person => {
+    const latest = await rest(ctx.token, `location_points?select=id,rep_id,shift_id,lat,lng,captured_at,accuracy_m&rep_id=eq.${person.rep.id}&captured_at=gte.${encodeURIComponent(quotedTime(new Date(now.getTime()-20000).toISOString()))}&order=captured_at.desc&limit=1`);
+    person.liveLocation = currentGpsLocation(latest || [], person.shifts, now);
+  }));
+  if (preview) {
+    const fixture = JSON.parse(await readFile(new URL('../data/gps-preview.json', import.meta.url), 'utf8'));
+    const visits = fixture.visits.filter(visit => +new Date(visit.arrived_at) >= +start && +new Date(visit.arrived_at) < +end);
+    // Never insert synthetic movement, shifts, attendance or productivity into production tables.
+    selected.example = { label: fixture.label, description: fixture.description, visits };
+  }
+  return { date, timeZone, selectedRepId, dayStart: start.toISOString(), dayEnd: end.toISOString(), generatedAt: now.toISOString(), previewAvailable: Boolean(previewRepId), previewRepId, preview, people };
+}
+
+async function insertPoint(ctx, { shiftId, coord, accuracy, kind, leadId, doorStatus, capturedAt }) {
   const payload = {
     shift_id: shiftId,
     lat: coord.lat,
@@ -309,13 +359,14 @@ async function insertPoint(ctx, { shiftId, coord, accuracy, kind, leadId, doorSt
     lead_id: leadId,
     door_status: doorStatus
   };
+  if (capturedAt) payload.captured_at = capturedAt;
   try {
-    const rows = await rest(ctx.token, 'location_points', { method: 'POST', body: payload });
+    const rows = await rest(ctx.token, 'location_points', { method: 'POST', body: payload, headers: { Prefer: 'return=minimal' } });
     return rows?.[0] || null;
   } catch (error) {
     if (error.code === '23503' && payload.lead_id) {
       payload.lead_id = null;
-      const rows = await rest(ctx.token, 'location_points', { method: 'POST', body: payload });
+      const rows = await rest(ctx.token, 'location_points', { method: 'POST', body: payload, headers: { Prefer: 'return=minimal' } });
       return rows?.[0] || null;
     }
     throw error;
@@ -323,7 +374,7 @@ async function insertPoint(ctx, { shiftId, coord, accuracy, kind, leadId, doorSt
 }
 
 async function saveConsent(ctx) {
-  if (!isFieldRole(ctx.rep.role)) throw fail('Location consent is for appointment setters and sales reps.', 403);
+  if (!isFieldRole(ctx.rep.role) && !isAdminRole(ctx.rep.role)) throw fail('An active team profile is required.', 403);
   try {
     const rows = await rest(ctx.token, 'location_consents', {
       method: 'POST',
@@ -337,7 +388,7 @@ async function saveConsent(ctx) {
 }
 
 async function clockIn(ctx, body) {
-  if (!isFieldRole(ctx.rep.role)) throw fail('Clock in is for appointment setters and sales reps.', 403);
+  if (!isFieldRole(ctx.rep.role) && !isAdminRole(ctx.rep.role)) throw fail('An active team profile is required.', 403);
   if (!await consentRow(ctx)) throw fail('Agree to the location notice before clocking in.', 403, 'CONSENT_REQUIRED');
   if (await openShift(ctx)) throw fail('You are already clocked in.', 409);
   const coord = cleanCoord(body.lat, body.lng);
@@ -358,7 +409,7 @@ async function clockIn(ctx, body) {
 }
 
 async function clockOut(ctx, body) {
-  if (!isFieldRole(ctx.rep.role)) throw fail('Clock out is for appointment setters and sales reps.', 403);
+  if (!isFieldRole(ctx.rep.role) && !isAdminRole(ctx.rep.role)) throw fail('An active team profile is required.', 403);
   const shift = await openShift(ctx);
   if (!shift) throw fail('You are not clocked in.', 409);
   const coord = cleanCoord(body.lat, body.lng);
@@ -377,7 +428,7 @@ async function clockOut(ctx, body) {
 }
 
 async function doorPoint(ctx, body) {
-  if (!isFieldRole(ctx.rep.role)) return { skipped: true, reason: 'role' };
+  if (!isFieldRole(ctx.rep.role) && !isAdminRole(ctx.rep.role)) return { skipped: true, reason: 'role' };
   const shift = await openShift(ctx);
   if (!shift) return { skipped: true, reason: 'not_clocked_in' };
   const coord = cleanCoord(body.lat, body.lng);
@@ -394,13 +445,15 @@ async function doorPoint(ctx, body) {
 }
 
 async function liveLocation(ctx, body) {
-  if (!isFieldRole(ctx.rep.role)) throw fail('Location sharing is for field profiles.', 403);
+  if (!isFieldRole(ctx.rep.role) && !isAdminRole(ctx.rep.role)) throw fail('An active team profile is required.', 403);
   if (!await consentRow(ctx)) throw fail('Agree to the updated location notice.',403,'CONSENT_REQUIRED');
   const shift=await openShift(ctx);
   if (!shift || shift.id!==body.shiftId) throw fail('This shift is no longer open.',409);
   const coord=cleanCoord(body.lat,body.lng);
   if (!coord || coord.error) throw fail(coord?.error || 'Location is required.',400);
-  const point=await insertPoint(ctx,{shiftId:shift.id,coord,accuracy:cleanAccuracy(body.accuracy),kind:'live',leadId:null,doorStatus:null});
+  const captured = body.capturedAt == null ? Date.now() : Date.parse(body.capturedAt);
+  if (!Number.isFinite(captured) || captured < Date.now()-20000 || captured > Date.now()+5000 || captured < Date.parse(shift.clock_in_at)) throw fail('A fresh location from this shift is required.',400,'STALE_LOCATION');
+  const point=await insertPoint(ctx,{shiftId:shift.id,coord,accuracy:cleanAccuracy(body.accuracy),kind:'live',leadId:null,doorStatus:null,capturedAt:new Date(captured).toISOString()});
   return {point};
 }
 
@@ -432,11 +485,12 @@ async function markRead(ctx, body) {
 async function handleGet(ctx, url) {
   const view = url.searchParams.get('view') || 'status';
   if(view==='settings'){await requireFeature(ctx.request,'intake');return schedulingSettings(ctx);}
-  if(view!=='status')await requireFeature(ctx.request,view==='shifts'?'shifts':'messages');
+  if(view!=='status')await requireFeature(ctx.request,['shifts','gps'].includes(view)?'shifts':'messages');
   if (view === 'status') return viewStatus(ctx);
   if (view === 'inbox') return viewInbox(ctx);
   if (view === 'thread') return viewThread(ctx, url);
   if (view === 'shifts') return viewShifts(ctx, url);
+  if (view === 'gps') return viewGps(ctx, url);
   throw fail('Unknown view.', 404);
 }
 

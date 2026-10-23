@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+const source = readFileSync(new URL('../tn-files/users-gps.js', import.meta.url), 'utf8');
+const now = Date.parse('2026-10-23T18:00:00Z');
+class Clock extends Date { static now() { return now; } }
+const state = { locationUnavailable: false, data: { preview: false } };
+const helpers = vm.runInNewContext(source.slice(source.indexOf('const pointTime ='), source.indexOf('function destroyMap()')) + '\n({ liveState, displayedVisits, duration });', { state, Date: Clock });
+const person = { shifts: [{ id: 'SHIFT', clock_out_at: null }], visits: [{ id: 'recorded' }], example: { visits: [{ id: 'example' }] }, liveLocation: { lat: 40.7, lng: -82.5, captured_at: new Date(now - 5000).toISOString(), accuracy_m: 8 } };
+assert.equal(helpers.liveState(person).fresh, true);
+person.liveLocation.captured_at = new Date(now - 20000).toISOString();
+assert.equal(helpers.liveState(person).fresh, true);
+person.liveLocation.captured_at = new Date(now - 20001).toISOString();
+assert.equal(helpers.liveState(person).fresh, false, 'a position must expire locally even when the API does not answer');
+person.liveLocation.captured_at = new Date(now).toISOString();
+for (const accuracy of [null, -1, 25.01, NaN, Infinity]) { person.liveLocation.accuracy_m = accuracy; assert.equal(helpers.liveState(person).fresh, false, `reject uncertain accuracy ${accuracy}`); }
+person.liveLocation.accuracy_m = 8;
+state.locationUnavailable = true;
+assert.equal(helpers.liveState(person).fresh, false, 'failed refresh must not keep a live/green location');
+state.locationUnavailable = false;
+person.shifts[0].clock_out_at = new Date(now).toISOString();
+assert.equal(helpers.liveState(person).fresh, false, 'clock-out suppresses a still-fresh point');
+assert.match(helpers.liveState(person).label, /sharing stopped/);
+assert.equal(helpers.displayedVisits(person)[0].id, 'recorded');
+state.data.preview = true;
+assert.equal(helpers.displayedVisits(person)[0].id, 'example', 'examples never merge with recorded visits');
+assert.equal(helpers.duration(null), 'Unavailable');
+assert.equal(helpers.duration(120), '2m 0s');
+assert.equal(helpers.duration(3670), '1h 1m');
+console.log('Users GPS local freshness, accuracy, clock-out, refresh failure and example isolation passed.');

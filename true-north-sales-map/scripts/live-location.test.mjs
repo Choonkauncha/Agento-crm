@@ -23,8 +23,14 @@ try{
  writes=[];open=false;assert.equal((await post(body)).status,409);assert.equal(writes.length,0);
  open=true;assert.equal((await post({...body,shiftId:rep})).status,409);
  consent=false;assert.equal((await post(body)).status,403);
- consent=true;role='admin';assert.equal((await post(body)).status,403);
+ consent=true;role='admin';assert.equal((await post(body)).status,200);
+ role='manager';assert.equal((await post(body)).status,200);
+ role='appointment_setter';
+ assert.equal((await post({...body,capturedAt:new Date(Date.now()-60000).toISOString()})).status,400);
+ assert.equal((await post({...body,capturedAt:new Date(Date.now()+60000).toISOString()})).status,400);
+ assert.equal((await post({...body,capturedAt:'bad'})).status,400);
+ writes=[];
  role='appointment_setter';assert.equal((await post({...body,lat:null,lng:null})).status,400);
  open=false;assert.equal((await post({action:'clock-in'})).status,400);assert.equal(writes.length,0);
- console.log('Live locations: setter access, consent, shift ownership, closed-shift refusal, GPS requirement passed');
+ console.log('Live locations: team/admin access, consent, shift ownership, closed-shift refusal, stale/future refusal and GPS requirement passed');
 }finally{globalThis.fetch=originalFetch;}

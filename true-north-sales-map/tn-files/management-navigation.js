@@ -36,7 +36,7 @@ export function mountManagementNavigation(root = document) {
     content.append(group);
     groups.set(key, { group, list });
   }
-  const keys = node => node.dataset.tab || ({ openMessages: 'messages', openMap: 'map', exportCsv: 'export' })[node.id] || (node.matches('a[href="/shifts.html"]') ? 'shifts' : '');
+  const keys = node => node.dataset.tab || ({ openMessages: 'messages', openMap: 'map', exportCsv: 'export' })[node.id] || (node.matches('a[href="/shifts.html"]') ? 'shifts' : node.matches('a[href="/users-gps.html"]') ? 'users-gps' : '');
   const hidden = (node, value) => { if (node.hidden !== value) node.hidden = value; };
   function controls() { return [...rail.querySelectorAll('[data-tab], #openMessages, #openMap, #exportCsv, a.railLink')]; }
   function organize() {
@@ -56,7 +56,7 @@ export function mountManagementNavigation(root = document) {
         node.replaceChildren();
         const icon = document.createElement('span');
         icon.className = 'managementNavIcon';
-        const iconKey = { messages: 'activity', map: 'map', export: 'files', features: 'accounts', scheduling: 'appointments', 'coach-settings': 'training' }[key] || key;
+        const iconKey = { messages: 'activity', 'users-gps': 'map', map: 'map', export: 'files', features: 'accounts', scheduling: 'appointments', 'coach-settings': 'training' }[key] || key;
         icon.innerHTML = atlasIcon(iconKey);
         node.append(icon, label);
       }
