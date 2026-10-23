@@ -1,6 +1,6 @@
 /* Management keeps destinations visible and grouped around the work people do. */
 body.tn-admin-workspace .dashboardShell{grid-template-columns:248px minmax(0,1fr);gap:28px}
-body.tn-admin-workspace #managementRail{display:flex;flex-direction:column;gap:0;width:auto;min-width:0;padding:20px 14px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--atlas-line);border-radius:14px;background:var(--atlas-header);height:calc(100dvh - 150px);max-height:calc(100dvh - 150px)}
+body.tn-admin-workspace #managementRail{display:flex;flex-direction:column;gap:0;width:auto;min-width:0;padding:20px 14px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--atlas-line);border-radius:14px;background:var(--atlas-header);top:calc(var(--workspace-header) + 20px);height:calc(100dvh - var(--workspace-header) - 40px);max-height:calc(100dvh - var(--workspace-header) - 40px)}
 #managementRail [hidden],#managementNavScrim[hidden]{display:none!important}
 .managementRailHead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 8px 18px}
 .managementRailEyebrow{display:block;color:var(--atlas-muted);font-size:10px;font-weight:700;letter-spacing:.12em;margin-bottom:5px}
@@ -31,11 +31,9 @@ body.tn-admin-workspace .dashMain{min-width:0}
 .managementBreadcrumb strong{font-weight:650;color:var(--atlas-text)}
 .managementLocationText p{margin:4px 0 0;font-size:12px;line-height:1.6;color:var(--atlas-muted)}
 body.tn-admin-workspace #managementSectionsToggle{display:none}
-body.tn-admin-workspace .managementQuickAction{flex:0 0 auto;min-height:40px;gap:10px;font-size:11px}
 .managementNavScrim{position:fixed;inset:0;z-index:2590;border:0!important;border-radius:0!important;background:rgba(0,0,0,.65);backdrop-filter:blur(3px);cursor:pointer}
 #managementRail :is(button,input,a):focus-visible,#managementSectionsToggle:focus-visible{outline:2px solid var(--atlas-accent);outline-offset:3px}
-@media(max-width:1100px) and (min-width:961px){body.tn-admin-workspace #managementRail{top:88px;height:calc(100dvh - 108px);max-height:calc(100dvh - 108px)}}
-@media(max-width:960px){
+@media(max-width:1100px){
   body.tn-admin-workspace .dashboardShell{display:block;grid-template-columns:minmax(0,1fr)}
   body.tn-admin-workspace #managementRail{position:fixed;inset:0 auto 0 0;z-index:2600;display:flex;flex-direction:column;align-items:stretch;gap:0;width:min(330px,90vw);height:100dvh;max-height:100dvh;padding:22px 16px 32px;border:0;border-right:1px solid var(--atlas-line);border-radius:0;overflow-x:hidden;overflow-y:auto;transform:translateX(-105%);visibility:hidden;pointer-events:none;transition:transform .2s ease,visibility .2s}
   body.tn-admin-workspace .managementNavOpen #managementRail{transform:translateX(0);visibility:visible;pointer-events:auto}
@@ -44,10 +42,11 @@ body.tn-admin-workspace .managementQuickAction{flex:0 0 auto;min-height:40px;gap
   body.tn-admin-workspace #managementSectionSearch{height:44px;font-size:13px}
   body.tn-admin-workspace #managementRail [data-management-key]{min-height:44px;font-size:13px}
   .managementLocation{flex-wrap:wrap;gap:12px;margin-bottom:20px;padding-bottom:18px}
-  body.tn-admin-workspace #managementSectionsToggle{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;margin:0;padding:10px 12px;border:1px solid var(--atlas-line);border-radius:8px;background:var(--atlas-header);color:var(--atlas-text);font-family:inherit;font-size:12px;font-weight:650}
+  body.tn-admin-workspace #managementSectionsToggle{display:flex;align-items:center;justify-content:center;gap:8px;flex:0 0 auto;min-height:44px;margin:0;padding:10px 12px;border:1px solid var(--atlas-line);border-radius:8px;background:var(--atlas-header);color:var(--atlas-text);font-family:inherit;font-size:12px;font-weight:650}
+  #managementSectionsToggle span{display:inline}
   #managementSectionsToggle svg{width:18px;height:18px}
-  .managementLocationText{flex:1 1 calc(100% - 125px)}
   .managementLocationText p{font-size:11px}
-  body.tn-admin-workspace .managementQuickAction{margin-left:auto}
 }
 @media(prefers-reduced-motion:reduce){body.tn-admin-workspace #managementRail{transition:none}}
+
+body.tn-admin-workspace .headerLinks:empty{display:none}

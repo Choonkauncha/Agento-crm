@@ -5,6 +5,7 @@ export const MANAGEMENT_GROUPS = [
   ['resources', 'Resources'],
   ['settings', 'Settings'],
   ['tools', 'Field tools'],
+  ['personal', 'Your account'],
 ];
 export const MANAGEMENT_DESTINATIONS = {
   overview: { group: 'daily', label: 'Overview', description: 'Upcoming inspections, team activity, and items needing attention.', keywords: 'dashboard today summary home' },
@@ -23,6 +24,13 @@ export const MANAGEMENT_DESTINATIONS = {
   features: { group: 'settings', label: 'Feature access', description: 'Choose which tools appointment setters and sales reps can use.', keywords: 'permissions roles toggle enable disable access settings' },
   'coach-settings': { group: 'settings', label: 'Voice coach', description: 'Configure the assistant’s coaching goals and company guidance.', keywords: 'gemini ai coach assistant prompt voice settings' },
   map: { group: 'tools', label: 'Field map', description: 'Open addresses, routes, and field navigation.', keywords: 'map route navigation houses canvassing' },
+  'book-inspection': { group: 'daily', label: 'Book inspection', description: 'Open the inspection form and book a homeowner inspection.', keywords: 'intake schedule appointment create new booking' },
+  'make-route': { group: 'tools', label: 'Make employee route', description: 'Build and assign a route for an employee.', keywords: 'make route plan employee assignment navigation' },
+  forms: { group: 'tools', label: 'My forms', description: 'Open your forms, estimates, and receipts.', keywords: 'personal paperwork estimate receipt' },
+  photos: { group: 'tools', label: 'Roof photos', description: 'Open the property photo bank.', keywords: 'roof camera photos bank images pictures' },
+  'my-training': { group: 'personal', label: 'My training', description: 'Open your own lessons and training progress.', keywords: 'personal learning lessons practice' },
+  account: { group: 'personal', label: 'My account', description: 'Review your profile and account settings.', keywords: 'profile password login settings' },
+  'sign-out': { group: 'personal', label: 'Sign out', description: 'Sign out of True North on this device.', keywords: 'logout log out session' },
   export: { group: 'tools', label: 'Export leads', description: 'Download the current lead data as a CSV file.', keywords: 'export csv download spreadsheet report' },
 };
 export function managementDestination(key, fallback = '') {

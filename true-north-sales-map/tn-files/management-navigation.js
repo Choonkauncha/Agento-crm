@@ -20,7 +20,7 @@ export function mountManagementNavigation(root = document) {
   const content = rail.querySelector('#managementSections');
   const queryStatus = rail.querySelector('#managementSearchStatus');
   if (!content || !scrim) return;
-  const narrow = matchMedia('(max-width: 960px)');
+  const narrow = matchMedia('(max-width: 1100px)');
   const groups = new Map();
   const unavailable = new WeakSet();
   for (const [key, label] of MANAGEMENT_GROUPS) {
@@ -36,9 +36,9 @@ export function mountManagementNavigation(root = document) {
     content.append(group);
     groups.set(key, { group, list });
   }
-  const keys = node => node.dataset.tab || ({ openMessages: 'messages', openMap: 'map', exportCsv: 'export' })[node.id] || (node.matches('a[href="/shifts.html"]') ? 'shifts' : node.matches('a[href="/users-gps.html"]') ? 'users-gps' : '');
+  const keys = node => node.dataset.tab || node.dataset.managementLink || ({ openMessages: 'messages', openMap: 'map', exportCsv: 'export' })[node.id] || (node.matches('a[href="/shifts.html"]') ? 'shifts' : node.matches('a[href="/users-gps.html"]') ? 'users-gps' : '');
   const hidden = (node, value) => { if (node.hidden !== value) node.hidden = value; };
-  function controls() { return [...rail.querySelectorAll('[data-tab], #openMessages, #openMap, #exportCsv, a.railLink')]; }
+  function controls() { return [...rail.querySelectorAll('[data-tab], #openMessages, #openMap, #exportCsv, [data-management-link], a.railLink')]; }
   function organize() {
     for (const node of controls()) {
       const key = keys(node), item = managementDestination(key, node.textContent.trim());
@@ -56,7 +56,7 @@ export function mountManagementNavigation(root = document) {
         node.replaceChildren();
         const icon = document.createElement('span');
         icon.className = 'managementNavIcon';
-        const iconKey = { messages: 'activity', 'users-gps': 'map', map: 'map', export: 'files', features: 'accounts', scheduling: 'appointments', 'coach-settings': 'training' }[key] || key;
+        const iconKey = { messages: 'activity', 'users-gps': 'map', map: 'map', export: 'files', features: 'accounts', scheduling: 'appointments', 'coach-settings': 'training', 'book-inspection': 'appointments', 'make-route': 'territories', forms: 'files', photos: 'photos', 'my-training': 'training', account: 'accounts', 'sign-out': 'arrow' }[key] || key;
         icon.innerHTML = atlasIcon(iconKey);
         node.append(icon, label);
       }
@@ -134,12 +134,19 @@ export function mountManagementNavigation(root = document) {
     }
   });
   rail.addEventListener('click', event => {
-    if (!event.target.closest('[data-tab], #openMessages, #openMap, #exportCsv, a.railLink')) return;
+    if (!event.target.closest('[data-tab], #openMessages, #openMap, #exportCsv, [data-management-link], a.railLink')) return;
     if (filter) filter.value = '';
     applyFilter();
     if (narrow.matches) setOpen(false, true);
     requestAnimationFrame(syncCurrent);
   });
+  function syncAvailability() {
+    const unavailable = shell.hidden || shell.classList.contains('hidden');
+    if (toggle) toggle.hidden = unavailable;
+    if (unavailable) setOpen(false);
+  }
+  new MutationObserver(syncAvailability).observe(shell, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  syncAvailability();
   const onResize = () => setOpen(false);
   narrow.addEventListener('change', onResize);
   document.addEventListener('tn-admin-view', () => requestAnimationFrame(syncCurrent));
