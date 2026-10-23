@@ -15,7 +15,7 @@ These public property pages establish that the addresses identify residential ho
 
 ## Preview separation
 
-`data/gps-preview.json` contains six simulated visits, each explicitly marked `source: "preview"`. The durations are 7, 11, 5, 9, 13, and 8 minutes. The fictional schedule is October 23, 2026, in America/New_York. It must be rendered as preview activity, never inserted as real shifts or GPS samples, never counted in payroll or employee productivity, and never described as evidence that anyone attended these homes.
+`data/gps-preview.json` contains six simulated visits, each explicitly marked `source: "preview"`. The durations are 7, 11, 5, 9, 13, and 8 minutes. The fictional schedule is October 23, 2026, from 4:30 p.m. to 6:00 p.m. in America/New_York. It must be rendered as preview activity, never inserted as real shifts or GPS samples, never counted in payroll or employee productivity, and never described as evidence that anyone attended these homes.
 
 The fixture deliberately contains no employee ID or name. Bind it to the requested administrator only after authorization in the management API. Gate display and data responses to active management users. The real GPS history remains separate.
 

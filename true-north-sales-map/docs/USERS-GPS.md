@@ -6,7 +6,7 @@ All working roles can clock in to their own account after agreeing to the locati
 
 House times are estimates based on actual observations. Current matching defaults: nearest house within 30 metres, GPS accuracy no worse than 25 metres, at least 30 seconds and three observations, and no gap longer than 20 seconds. A second neighboring house within the GPS uncertainty leaves the reading unmatched; a nearby explicit door action can identify the house. Durations end at the last supporting sample rather than assuming time until a later exit or refresh. Coordinates and reported accuracy cannot prove a door knock, conversation or exact property entry. The API pages individual-user history and reports an error rather than silently truncating excessive readings.
 
-The Travis Mackie admin has a separate **View example visits** action for October 23, 2026: six verified existing Mansfield/Lexington houses, 53 example minutes. It does not insert shifts, GPS readings, attendance or productivity records, and cannot be confused with recorded visits. Fixture address evidence is in `gps-address-sources.md`. `GPS_PREVIEW_REP_ID` can explicitly select a different preview admin; otherwise the active admin named Travis Mackie is selected.
+The Travis Mackie admin has a separate **View example visits** action for October 23, 2026, from 4:30 p.m. to 6:00 p.m. Eastern: six verified existing Mansfield/Lexington houses, 53 example minutes. It does not insert shifts, GPS readings, attendance or productivity records, and cannot be confused with recorded visits. Fixture address evidence is in `gps-address-sources.md`. `GPS_PREVIEW_REP_ID` can explicitly select a different preview admin; otherwise the active admin named Travis Mackie is selected.
 
 ## Release order
 
