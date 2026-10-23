@@ -1,10 +1,100 @@
 {
   "source": "preview",
-  "label": "Preview visits",
+  "label": "Example visits",
   "description": "Simulated house visits at verified real addresses. These are not recorded employee movements.",
   "verified_at": "2026-10-23",
   "coordinate_source": "Existing map data/leads.json geocodes; address existence checked against public residential listings. Coordinates have not been independently surveyed.",
   "visits": [
+    {
+      "id": "preview-visit-11",
+      "source": "preview",
+      "lead_id": "csv-154030078",
+      "address": "1605 GRACE ST, Mansfield, OH 44905-2744",
+      "lat": 40.7707123,
+      "lng": -82.4569963,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.zillow.com/homedetails/1605-Grace-St-Mansfield-OH-44905/86605001_zpid/",
+        "evidence": "Zillow SingleFamily property page",
+        "existing_geocode_match": "Exact"
+      },
+      "arrived_at": "2026-10-23T16:30:00-04:00",
+      "departed_at": "2026-10-23T16:34:00-04:00",
+      "duration_seconds": 240
+    },
+    {
+      "id": "preview-visit-10",
+      "source": "preview",
+      "lead_id": "csv-158610267",
+      "address": "1334 CHEW RD, Mansfield, OH 44903-9228",
+      "lat": 40.7265057,
+      "lng": -82.4644424,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.zillow.com/homedetails/1334-Chew-Rd-Mansfield-OH-44903/116239376_zpid/",
+        "evidence": "Zillow Single Family Residence property page",
+        "existing_geocode_match": "Exact"
+      },
+      "arrived_at": "2026-10-23T16:39:00-04:00",
+      "departed_at": "2026-10-23T16:44:00-04:00",
+      "duration_seconds": 300
+    },
+    {
+      "id": "preview-visit-9",
+      "source": "preview",
+      "lead_id": "csv-156303113",
+      "address": "2279 MANSFIELD LUCAS RD, Mansfield, OH 44903-8694",
+      "lat": 40.7175797,
+      "lng": -82.458167,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.realtor.com/realestateandhomes-detail/2279-Mansfield-Lucas-Rd_Mansfield_OH_44903_M35636-28064",
+        "evidence": "Realtor.com Single Family property page",
+        "existing_geocode_match": "Exact"
+      },
+      "arrived_at": "2026-10-23T16:46:00-04:00",
+      "departed_at": "2026-10-23T16:50:00-04:00",
+      "duration_seconds": 240
+    },
+    {
+      "id": "preview-visit-8",
+      "source": "preview",
+      "lead_id": "csv-155842143",
+      "address": "60 RAMBLESIDE DR, Mansfield, OH 44907-2028",
+      "lat": 40.734159,
+      "lng": -82.5155661,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/60-Rambleside-Dr-44907/home/126468418",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      },
+      "arrived_at": "2026-10-23T16:55:00-04:00",
+      "departed_at": "2026-10-23T17:00:00-04:00",
+      "duration_seconds": 300
+    },
+    {
+      "id": "preview-visit-5",
+      "source": "preview",
+      "lead_id": "csv-157769308",
+      "address": "836 PEACEFUL PATH, Mansfield, OH 44907-2022",
+      "lat": 40.7370016,
+      "lng": -82.519611,
+      "arrived_at": "2026-10-23T17:01:00-04:00",
+      "departed_at": "2026-10-23T17:07:00-04:00",
+      "duration_seconds": 360,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/836-Peaceful-Path-44907/home/126500948",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      }
+    },
     {
       "id": "preview-visit-1",
       "source": "preview",
@@ -12,9 +102,9 @@
       "address": "1051 YORKWOOD RD, Mansfield, OH 44907-2434",
       "lat": 40.7301027,
       "lng": -82.5254566,
-      "arrived_at": "2026-10-23T16:30:00-04:00",
-      "departed_at": "2026-10-23T16:37:00-04:00",
-      "duration_seconds": 420,
+      "arrived_at": "2026-10-23T17:09:00-04:00",
+      "departed_at": "2026-10-23T17:14:00-04:00",
+      "duration_seconds": 300,
       "status": "completed",
       "verification": {
         "verified_at": "2026-10-23",
@@ -24,15 +114,33 @@
       }
     },
     {
+      "id": "preview-visit-7",
+      "source": "preview",
+      "lead_id": "csv-158275110",
+      "address": "688 COLEMAN RD, Mansfield, OH 44903-1845",
+      "lat": 40.7507157,
+      "lng": -82.5408982,
+      "status": "completed",
+      "verification": {
+        "verified_at": "2026-10-23",
+        "url": "https://www.redfin.com/OH/Mansfield/688-Coleman-Rd-44903/home/126140646",
+        "evidence": "Redfin residential property page",
+        "existing_geocode_match": "Exact"
+      },
+      "arrived_at": "2026-10-23T17:18:00-04:00",
+      "departed_at": "2026-10-23T17:22:00-04:00",
+      "duration_seconds": 240
+    },
+    {
       "id": "preview-visit-2",
       "source": "preview",
       "lead_id": "csv-158242739",
       "address": "850 ARLINGTON AVE, Mansfield, OH 44903-7020",
       "lat": 40.7513908,
       "lng": -82.54709,
-      "arrived_at": "2026-10-23T16:43:00-04:00",
-      "departed_at": "2026-10-23T16:54:00-04:00",
-      "duration_seconds": 660,
+      "arrived_at": "2026-10-23T17:23:00-04:00",
+      "departed_at": "2026-10-23T17:29:00-04:00",
+      "duration_seconds": 360,
       "status": "completed",
       "verification": {
         "verified_at": "2026-10-23",
@@ -48,8 +156,8 @@
       "address": "98 PARKWOOD BLVD, Mansfield, OH 44906-3218",
       "lat": 40.756602,
       "lng": -82.5391833,
-      "arrived_at": "2026-10-23T17:00:00-04:00",
-      "departed_at": "2026-10-23T17:05:00-04:00",
+      "arrived_at": "2026-10-23T17:31:00-04:00",
+      "departed_at": "2026-10-23T17:36:00-04:00",
       "duration_seconds": 300,
       "status": "completed",
       "verification": {
@@ -66,32 +174,14 @@
       "address": "121 PARKWOOD BLVD, Mansfield, OH 44906-3217",
       "lat": 40.756159,
       "lng": -82.5390415,
-      "arrived_at": "2026-10-23T17:12:00-04:00",
-      "departed_at": "2026-10-23T17:21:00-04:00",
-      "duration_seconds": 540,
+      "arrived_at": "2026-10-23T17:37:00-04:00",
+      "departed_at": "2026-10-23T17:42:00-04:00",
+      "duration_seconds": 300,
       "status": "completed",
       "verification": {
         "verified_at": "2026-10-23",
         "url": "https://www.zillow.com/homedetails/121-Parkwood-Blvd-Mansfield-OH-44906/86611300_zpid/",
         "evidence": "Zillow SingleFamily property page",
-        "existing_geocode_match": "Exact"
-      }
-    },
-    {
-      "id": "preview-visit-5",
-      "source": "preview",
-      "lead_id": "csv-157769308",
-      "address": "836 PEACEFUL PATH, Mansfield, OH 44907-2022",
-      "lat": 40.7370016,
-      "lng": -82.519611,
-      "arrived_at": "2026-10-23T17:30:00-04:00",
-      "departed_at": "2026-10-23T17:43:00-04:00",
-      "duration_seconds": 780,
-      "status": "completed",
-      "verification": {
-        "verified_at": "2026-10-23",
-        "url": "https://www.redfin.com/OH/Mansfield/836-Peaceful-Path-44907/home/126500948",
-        "evidence": "Redfin residential property page",
         "existing_geocode_match": "Exact"
       }
     },
@@ -102,9 +192,9 @@
       "address": "2699 LEXINGTON STEAM CORNERS RD, Lexington, OH 44904-8610",
       "lat": 40.6803959,
       "lng": -82.6101311,
-      "arrived_at": "2026-10-23T17:52:00-04:00",
+      "arrived_at": "2026-10-23T17:54:00-04:00",
       "departed_at": "2026-10-23T18:00:00-04:00",
-      "duration_seconds": 480,
+      "duration_seconds": 360,
       "status": "completed",
       "verification": {
         "verified_at": "2026-10-23",
@@ -113,5 +203,14 @@
         "existing_geocode_match": "Exact"
       }
     }
-  ]
+  ],
+  "schedule": {
+    "date": "2026-10-23",
+    "timezone": "America/New_York",
+    "start": "2026-10-23T16:30:00-04:00",
+    "end": "2026-10-23T18:00:00-04:00",
+    "visit_minutes": 55,
+    "unassigned_minutes": 35,
+    "description": "Illustrative timing only; gaps are not measured travel or verified routing."
+  }
 }

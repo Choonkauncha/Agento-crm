@@ -13,13 +13,13 @@ const session = { access_token: 'synthetic-ui-token', user: { id: ADMIN, email: 
 const rep = () => ({ id: ADMIN, user_id: ADMIN, name: 'Preview Admin', role, active: true });
 function payload(url) {
   const now = Date.now(), selected = url.searchParams.get('repId');
-  const visit = { lead_id: 'HOUSE-UI', address: 'Synthetic House <img src=x onerror=alert(1)>', lat: 40.759, lng: -82.515, arrived_at: new Date(now - 180000).toISOString(), departed_at: new Date(now - 60000).toISOString(), duration_seconds: 120, status: 'completed', source: 'gps', accuracy_m: 8 };
+  const visit = { lead_id: 'HOUSE-UI', address: 'Synthetic House <img src=x onerror=alert(1)>', lat: 40.759, lng: -82.515, arrived_at: '2026-10-23T21:10:00Z', departed_at: '2026-10-23T21:12:00Z', duration_seconds: 120, status: 'completed', source: 'gps', accuracy_m: 8 };
   const people = [
     { rep: rep(), shifts: [{ id: 'SHIFT-UI', rep_id: ADMIN, clock_in_at: new Date(now - 3600000).toISOString(), clock_out_at: null }], points: [], visits: selected === ADMIN ? [visit] : [], gaps: selected === ADMIN ? [{ duration_seconds: 70 }] : [], liveLocation: { lat: 40.759, lng: -82.515, captured_at: new Date(now).toISOString(), accuracy_m: 8 }, previewAvailable: true },
     { rep: { id: SETTER, name: 'Preview Setter', role: 'appointment_setter' }, shifts: [], visits: [], points: [], gaps: [], liveLocation: null },
   ];
-  if (url.searchParams.get('preview') === 'true') people[0].example = { label: 'Example itinerary', visits: Array.from({ length: 6 }, (_, i) => ({ ...visit, source: 'preview', address: `Example house ${i + 1}`, lead_id: `EXAMPLE-${i}`, lat: 40.76 + i / 1000 })) };
-  return { date: url.searchParams.get('date'), people, selectedRepId: selected, previewAvailable: true, previewRepId: ADMIN, preview: url.searchParams.get('preview') === 'true' };
+  if (selected === ADMIN) people[0].example = { label: 'Entered stops', visits: Array.from({ length: 11 }, (_, i) => ({ ...visit, source: 'preview', address: `Entered house ${i + 1}`, lead_id: `ENTERED-${i}`, lat: 40.76 + i / 1000, arrived_at: new Date(Date.parse('2026-10-23T20:30:00Z') + i * 480000).toISOString(), departed_at: new Date(Date.parse('2026-10-23T20:35:00Z') + i * 480000).toISOString(), duration_seconds: 300 })) };
+  return { date: url.searchParams.get('date'), people, selectedRepId: selected, previewAvailable: true, previewRepId: ADMIN };
 }
 const server = http.createServer(async (request, response) => {
   try {
@@ -54,19 +54,23 @@ try {
   await page.getByRole('button', { name: /Preview Admin/ }).waitFor();
   assert.equal(await page.locator('.gpsVisit').count(), 0, 'roster does not pretend unloaded details are visits');
   await page.getByRole('button', { name: /Preview Admin/ }).click();
-  await page.locator('.gpsVisit').waitFor();
+  await page.waitForFunction(() => document.querySelectorAll('.gpsVisit').length === 12);
   assert.equal(gpsRequests.at(-1).searchParams.get('repId'), ADMIN);
-  assert.match(await page.locator('.gpsVisit').innerText(), /2m 0s/);
+  assert.match(await page.locator('.gpsVisit[data-source="gps"]').innerText(), /2m 0s/);
   assert.equal(await page.locator('.gpsVisit img').count(), 0, 'addresses are escaped');
   assert.match(await page.locator('#gpsDetail').innerText(), /1 GPS gap/);
-  await page.getByRole('button', { name: 'View example visits' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.gpsVisit').length === 6);
-  assert.match(await page.locator('.gpsPreviewNotice').innerText(), /Example itinerary/);
-  assert.equal(gpsRequests.at(-1).searchParams.get('preview'), 'true');
-  assert.equal(await page.locator('.gpsVisit').filter({ hasText: 'Synthetic House' }).count(), 0, 'recorded visits and examples remain separate');
-  await page.getByRole('button', { name: 'Return to recorded visits' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.gpsVisit').length === 1);
+  assert.equal(await page.locator('.gpsVisit[data-source="preview"]').count(), 11, 'entered stops display in normal timeline');
+  assert.equal(await page.getByRole('button', { name: /View example|Return to recorded/ }).count(), 0, 'there is no separate mode');
   assert.equal(gpsRequests.at(-1).searchParams.has('preview'), false);
+  assert.match(await page.locator('.gpsStats > div').nth(0).innerText(), /^1\s+Matched house visits/);
+  assert.match(await page.locator('.gpsStats > div').nth(1).innerText(), /^2m 0s\s+Observed time near houses/);
+  assert.match(await page.locator('.gpsBadges').innerText(), /location current/);
+  assert.equal(await page.locator('.gpsVisitDetails').count(), 0);
+  assert.equal(await page.locator('.gpsBadges .preview').count(), 0, 'no source badge is shown');
+  assert.equal(await page.locator('.gpsPreviewNotice').count(), 0);
+  assert.equal(await page.locator('.gpsVisit').filter({ hasText: /Example|Entered stop|Entered duration|manually entered/ }).count(), 0, 'source metadata stays internal');
+  assert.equal(await page.locator('#gpsMap path[stroke="#165bc8"]').count(), 12, 'all house visits use the same marker style');
+  assert.equal(await page.locator('#gpsMap path[stroke="#128357"]').count() > 0, true, 'entered stops do not disable actual live GPS');
   await mkdir(path.join(root, '.ui-artifacts'), { recursive: true });
   await page.screenshot({ path: path.join(root, '.ui-artifacts/users-gps-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -87,5 +91,5 @@ try {
   await page.getByText('Users GPS is restricted to management profiles.', { exact: true }).waitFor();
   assert.equal(await page.locator('.gpsPerson').count(), 0);
   assert.deepEqual(errors, []);
-  console.log('Users GPS browser: roster, admin detail, address escaping, examples, map, mobile navigation, clock-out and denied access passed.');
+  console.log('Users GPS browser: roster, admin detail, address escaping, merged entered stops, recorded totals, map, mobile navigation, clock-out and denied access passed.');
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
