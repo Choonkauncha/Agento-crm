@@ -340,7 +340,7 @@ async function viewGps(ctx, url) {
     const latest = await rest(ctx.token, `location_points?select=id,rep_id,shift_id,lat,lng,captured_at,accuracy_m&rep_id=eq.${person.rep.id}&captured_at=gte.${encodeURIComponent(quotedTime(new Date(now.getTime()-20000).toISOString()))}&order=captured_at.desc&limit=1`);
     person.liveLocation = currentGpsLocation(latest || [], person.shifts, now);
   }));
-  if (preview) {
+  if (selected && selected.rep.id === previewRepId) {
     const fixture = JSON.parse(await readFile(new URL('../data/gps-preview.json', import.meta.url), 'utf8'));
     const visits = fixture.visits.filter(visit => +new Date(visit.arrived_at) >= +start && +new Date(visit.arrived_at) < +end);
     // Never insert synthetic movement, shifts, attendance or productivity into production tables.
