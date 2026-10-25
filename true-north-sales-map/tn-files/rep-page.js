@@ -73,8 +73,8 @@ function bindRepQuote() {
   const out = document.getElementById("repQuoteOutput");
   if (!form || !out) return;
   const compute = () => {
-    const area = Number(document.getElementById("repQuoteArea")?.value || 2500);
-    const waste = Number(document.getElementById("repQuoteWaste")?.value || 12);
+    const area = Math.min(25000, Math.max(600, Number(document.getElementById("repQuoteArea")?.value || 2500)));
+    const waste = Math.min(30, Math.max(5, Number(document.getElementById("repQuoteWaste")?.value ?? 12)));
     const squares = Number(((area * (1 + waste / 100)) / 100).toFixed(2));
     const tiers = [
       { name: "Good · IKO Cambridge", rate: 265 },
@@ -86,7 +86,7 @@ function bindRepQuote() {
       const price = Number((cost / 0.65).toFixed(2));
       const gp = Number((price - cost).toFixed(2));
       const comm = Number((gp * 0.10).toFixed(2));
-      return `<div class="tnCard"><b>${t.name}: ${Math.round(price).toLocaleString()} (${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</b><span>${squares} sq (w/ ${waste}% waste) · 35.0% Gross Margin (${Math.round(gp).toLocaleString()} GP) · Your 1099 Commission: ${comm.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>`;
+      return `<div class="tnCard"><b>${t.name}: $${Math.round(price).toLocaleString()} ($${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</b><span>${squares} sq (w/ ${waste}% waste) · 35.0% Gross Margin ($${Math.round(gp).toLocaleString()} GP) · Your 1099 Commission: $${comm.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>`;
     }).join("");
   };
   form.onsubmit = (e) => { e.preventDefault(); compute(); };

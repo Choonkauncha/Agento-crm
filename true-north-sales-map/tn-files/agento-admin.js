@@ -108,8 +108,10 @@ export function mountAgentoAdmin(sb, me) {
   const traceEl = section.querySelector('#agAdminTrace');
 
   function renderTierCards(area, wastePct, requestedMargin) {
-    const marginPct = Math.max(Number(requestedMargin || 35), 30);
-    const squares = Number(((area * (1 + wastePct / 100)) / 100).toFixed(2));
+    const cleanArea = Math.min(25000, Math.max(600, Number(area) || 2500));
+    const cleanWaste = Math.min(30, Math.max(5, Number(wastePct ?? 12)));
+    const marginPct = Math.min(65, Math.max(Number(requestedMargin ?? 35), 30));
+    const squares = Number(((cleanArea * (1 + cleanWaste / 100)) / 100).toFixed(2));
     const tiers = [
       { tier: 'Good · Architectural', product: 'IKO Cambridge', ratePerSq: 265 },
       { tier: 'Better · Impact Class 3', product: 'IKO Dynasty (Recommended)', ratePerSq: 283 },
@@ -153,8 +155,9 @@ export function mountAgentoAdmin(sb, me) {
       if (data?.result?.grossMarginPct) {
         section.querySelector('#agAdminMarginKpi').textContent = `${data.result.grossMarginPct}%`;
       }
-      if (data?.result?.projected1099Commission) {
-        section.querySelector('#agAdminCommKpi').textContent = `$${Number(data.result.projected1099Commission).toLocaleString()}`;
+      const commVal = data?.result?.projected1099Commission ?? data?.result?.rep1099Commission10PctGP;
+      if (commVal !== undefined) {
+        section.querySelector('#agAdminCommKpi').textContent = `$${Number(commVal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       }
       traceEl.textContent = JSON.stringify(data, null, 2);
     } catch (err) {

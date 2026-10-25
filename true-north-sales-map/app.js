@@ -3425,8 +3425,8 @@ async function executeMapAssistantAction(name,args){
     selectClusterAddresses({leadIds:state.filtered.filter(isCoords).map(lead=>lead.id)});return {status:'selected',executed:true,selectedCount:state.selected.size,limit:ROUTE_STOP_LIMIT};
   }
   if(name==='generate_margin_guarded_estimate'){
-    const area=Math.min(Math.max(Number(args.area||2500),400),50000);
-    const wastePct=Math.min(Math.max(Number(args.wastePct??12),5),35);
+    const area=Math.min(Math.max(Number(args.area||2500),600),25000);
+    const wastePct=Math.min(Math.max(Number(args.wastePct??12),5),30);
     const targetMarginPct=Math.min(Math.max(Number(args.targetMarginPct??35),30),65);
     const squares=Number(((area*(1+wastePct/100))/100).toFixed(2));
     const calc=(rate)=>{
@@ -3436,7 +3436,7 @@ async function executeMapAssistantAction(name,args){
       return {price,gp,comm:Number((gp*0.10).toFixed(2))};
     };
     const good=calc(265),better=calc(283),best=calc(318);
-    return {status:'estimated',executed:true,squares,targetMarginPct,goodPrice:good.price,betterPrice:better.price,bestPrice:best.price,repCommission1099:better.comm};
+    return {status:'estimate_generated',executed:true,squaresWithWaste:squares,squares,targetMarginPct,quotedPrice:better.price,goodPrice:good.price,betterPrice:better.price,bestPrice:best.price,projected1099Commission:better.comm,repCommission1099:better.comm};
   }
   throw Error('Unsupported map command.');
 }

@@ -49,6 +49,15 @@ async function attach(session){
    if(mapContext?.rep?.user_id===currentUser)return mapContext.executeMapAction(name,args);
    const session=await client.auth.getSession();if(session.data?.session?.user?.id!==rep.user_id)throw Error('Account changed.');
    const call=validateMapTool({name,args});
+   if(call.name==='generate_margin_guarded_estimate'){
+    const {area,wastePct,targetMarginPct}=call.args;
+    const squares=Number(((area*(1+wastePct/100))/100).toFixed(2));
+    const cost=Number((squares*283+650).toFixed(2));
+    const quotedPrice=Number((cost/(1-targetMarginPct/100)).toFixed(2));
+    const gp=Number((quotedPrice-cost).toFixed(2));
+    const comm=Number((gp*0.10).toFixed(2));
+    return {status:'estimate_generated',executed:true,squaresWithWaste:squares,squares,targetMarginPct,quotedPrice,betterPrice:quotedPrice,projected1099Commission:comm,repCommission1099:comm};
+   }
    // Never report the queued action as already executed. Reauthorize after the map loads.
    sessionStorage.setItem(PENDING,JSON.stringify({userId:rep.user_id,at:Date.now(),call}));
    setTimeout(()=>location.assign('/'),1200);

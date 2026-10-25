@@ -87,5 +87,5 @@ Autonomous field operations platform built for **True North Restorations** (Moun
 - **title:** Storm-to-Close Autonomous Field Loop (Mount Vernon, OH)
 - **1. Storm Triage & Route Dispatch |** Filter 17,177 Knox County properties after a hail event and assign a 25-door route to an active setter/rep in under 30 seconds.
 - **2. GPS Shift & Knock Compliance |** Track rep clock-in and verify property dwell times automatically instead of manual end-of-week timesheet checks.
-- **3. Instant Margin-Guarded Quote |** Convert a 2,400 sq ft aerial roof trace (26.88 squares with 12% waste) into an IKO Dynasty quote with guaranteed 35% gross margin.
+- **3. Instant Margin-Guarded Quote |** Convert a 2,500 sq ft aerial roof trace (28.00 squares with 12% waste) into a $13,190.77 IKO Dynasty quote ($12,415.38 Good / $14,698.46 Best) with guaranteed 35% gross margin and $461.68 1099 rep commission.
 - **4. Commission & Ledger Closeout |** Reconcile supplier invoices against homeowner payments and calculate exact 10% gross-profit 1099 rep commissions automatically.

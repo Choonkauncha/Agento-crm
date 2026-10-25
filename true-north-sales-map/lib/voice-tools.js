@@ -40,9 +40,10 @@ export function validateMapTool(call){
   return {name,args:{action:args.action}};
  }
  if(name==='generate_margin_guarded_estimate'){
-  const area=Number(args.area??2400);if(!Number.isFinite(area)||area<600||area>25000)throw Error('Roof area must be 600–25000 sq ft.');
+  const area=Number(args.area??2500);if(!Number.isFinite(area)||area<600||area>25000)throw Error('Roof area must be 600–25000 sq ft.');
   const wastePct=Number(args.wastePct??12);if(!Number.isFinite(wastePct)||wastePct<5||wastePct>30)throw Error('Waste percentage must be 5–30.');
-  return {name,args:{property:typeof args.property==='string'?args.property.trim():'513 South McKenzie St, Mount Vernon, OH 43050',area,wastePct}};
+  const targetMarginPct=Math.min(65,Math.max(30,Number(args.targetMarginPct??35)||35));
+  return {name,args:{property:typeof args.property==='string'&&args.property.trim()?args.property.trim():'513 South McKenzie St, Mount Vernon, OH 43050',area,wastePct,targetMarginPct}};
  }
  if(name==='recent_ohio_storms'){
   const days=args.days??3;if(!Number.isInteger(days)||days<1||days>7)throw Error('Storm days must be 1–7.');

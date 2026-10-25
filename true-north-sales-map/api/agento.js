@@ -85,9 +85,10 @@ function parseDamageFindings(findingsStr = '') {
   const windMatch = text.match(/(\d+)\s*wind/i);
   const hailMatch = text.match(/(\d+)\s*hail/i);
   const missingMatch = text.match(/(\d+)\s*(?:missing|tab|shingle)/i);
-  const windCount = windMatch ? Number(windMatch[1]) : 6;
-  const hailCount = hailMatch ? Number(hailMatch[1]) : 9;
-  const missingCount = missingMatch ? Number(missingMatch[1]) : 3;
+  const hasExplicitCounts = Boolean(windMatch || hailMatch || missingMatch);
+  const windCount = windMatch ? Number(windMatch[1]) : (hasExplicitCounts ? 0 : 6);
+  const hailCount = hailMatch ? Number(hailMatch[1]) : (hasExplicitCounts ? 0 : 9);
+  const missingCount = missingMatch ? Number(missingMatch[1]) : (hasExplicitCounts ? 0 : 3);
   const totalPoints = windCount + hailCount + missingCount * 2;
   let severity = 'Full Replacement Recommended (Insurance Restorable)';
   let recommendedSystem = 'IKO Dynasty Architectural (Class 3 Impact Rated)';
@@ -247,7 +248,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  let body = {};
+  try {
+    body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  } catch {
+    return res.status(400).json({ error: 'Invalid JSON request body' });
+  }
   const operation = body.operation;
   const actorRole = (body.actorRole || req.headers['x-agento-role'] || 'admin').toLowerCase();
   const payload = body.payload || {};
