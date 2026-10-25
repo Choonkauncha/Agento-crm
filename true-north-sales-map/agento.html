@@ -446,6 +446,33 @@
       </article>
     </section>
 
+    
+    <section class="domainGrid" id="liveTakeoffPanel" style="grid-template-columns: 1fr 1fr; margin-bottom: 24px;">
+      <article class="domainCard">
+        <div class="domainTag">
+          <span>Live Construction Material Takeoff</span>
+          <span id="takeoffSystem">IKO Dynasty Architectural</span>
+        </div>
+        <h2>Automated Rooftop BOM &amp; Work Order</h2>
+        <div class="kpiRow" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="kpiBox"><div class="kpiVal" id="bomSquares">28.0</div><div class="kpiLbl">Squares (w/ 12% Waste)</div></div>
+          <div class="kpiBox"><div class="kpiVal" id="bomBundles">84</div><div class="kpiLbl">Shingle Bundles</div></div>
+          <div class="kpiBox"><div class="kpiVal" id="bomIce">7</div><div class="kpiLbl">Ice &amp; Water Rolls</div></div>
+        </div>
+      </article>
+      <article class="domainCard">
+        <div class="domainTag">
+          <span>Live Good / Better / Best &amp; 1099 Ledger</span>
+          <span id="ledgerStatusBadge">35.0% Margin Verified</span>
+        </div>
+        <h2>Proposal Tiers &amp; Contractor Split</h2>
+        <div class="kpiRow" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="kpiBox"><div class="kpiVal" id="tierGood">$12,267</div><div class="kpiLbl">Good · IKO Cambridge</div></div>
+          <div class="kpiBox"><div class="kpiVal" id="tierBetter">$13,191</div><div class="kpiLbl">Better · IKO Dynasty</div></div>
+          <div class="kpiBox"><div class="kpiVal" id="tierBest">$14,774</div><div class="kpiLbl">Best · IKO Nordic</div></div>
+        </div>
+      </article>
+    </section>
     <section class="bottomGrid">
       <div class="domainCard">
         <div class="domainTag">
@@ -510,6 +537,17 @@
           if (json.result && json.result.quotedPrice) {
             document.getElementById('kpiQuoteVal').textContent = `$${Number(json.result.quotedPrice).toLocaleString()}`;
             document.getElementById('kpiCommVal').textContent = `$${Number(json.result.projected1099Commission).toLocaleString()}`;
+            if (json.result.tiers) {
+              document.getElementById('tierGood').textContent = `$${Math.round(json.result.tiers.good_iko_cambridge).toLocaleString()}`;
+              document.getElementById('tierBetter').textContent = `$${Math.round(json.result.tiers.better_iko_dynasty).toLocaleString()}`;
+              document.getElementById('tierBest').textContent = `$${Math.round(json.result.tiers.best_iko_nordic_impact).toLocaleString()}`;
+              document.getElementById('ledgerStatusBadge').textContent = `${json.result.grossMarginPct}% Margin Verified`;
+            }
+          }
+          if (json.result && json.result.materialTakeoff) {
+            document.getElementById('bomSquares').textContent = json.result.materialTakeoff.squaresWithWaste;
+            document.getElementById('bomBundles').textContent = json.result.materialTakeoff.shingleBundles;
+            document.getElementById('bomIce').textContent = json.result.materialTakeoff.iceAndWaterShieldRolls;
           }
           appendLog(true, `✓ ${json.domain} · ${operation} (role: ${actorRole})`, json.result);
         } else {
