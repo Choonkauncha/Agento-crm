@@ -545,6 +545,9 @@
               document.getElementById('ledgerStatusBadge').textContent = `${json.result.grossMarginPct}% Margin Verified`;
             }
           }
+          if (json.result && json.result.recommendedSystem) {
+            document.getElementById('takeoffSystem').textContent = json.result.recommendedSystem;
+          }
           if (json.result && json.result.materialTakeoff) {
             document.getElementById('bomSquares').textContent = json.result.materialTakeoff.squaresWithWaste;
             document.getElementById('bomBundles').textContent = json.result.materialTakeoff.shingleBundles;

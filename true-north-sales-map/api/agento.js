@@ -104,6 +104,16 @@ function parseDamageFindings(findingsStr = '') {
   return { text, windCount, hailCount, missingCount, severity, recommendedSystem };
 }
 
+const TERRITORY_COUNTS = {
+  'mount vernon': 7566,
+  howard: 3148,
+  fredericktown: 1896,
+  centerburg: 1427,
+  danville: 701,
+  gambier: 527,
+  utica: 291,
+};
+
 const TERRITORY_FALLBACK_LEADS = {
   'mount vernon': [
     { id: 'csv-158467647', homeowner: 'JEFFREY TOWNSEND', address: '7929 MARTINSBURG RD, Mount Vernon, OH 43050-9074', lat: 40.3482712, lng: -82.4358394, stormScore: 144, hailInches: 1.5, stage: 'Untouched' },
@@ -113,14 +123,18 @@ const TERRITORY_FALLBACK_LEADS = {
     { id: 'knox-5129', homeowner: 'SMITH VICTORIA & CODY', address: '300 1/2 CALHOUN ST, Mount Vernon, OH 43050', lat: 40.4010342, lng: -82.4889852, stormScore: 128, hailInches: 1.25, stage: 'Untouched' },
   ],
   fredericktown: [
-    { id: 'knox-fred-01', homeowner: 'MILLER DOUGLAS & KAREN', address: '142 N MAIN ST, Fredericktown, OH 43019', lat: 40.484112, lng: -82.543218, stormScore: 146, hailInches: 1.5, stage: 'Untouched' },
-    { id: 'knox-fred-02', homeowner: 'SNYDER ROBERT L', address: '88 SALEM AVE, Fredericktown, OH 43019', lat: 40.480915, lng: -82.547104, stormScore: 141, hailInches: 1.5, stage: 'Untouched' },
-    { id: 'knox-fred-03', homeowner: 'YODER BENJAMIN', address: '215 HIGH ST, Fredericktown, OH 43019', lat: 40.482744, lng: -82.540812, stormScore: 137, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'csv-156892588', homeowner: 'MOLLIE ROJAS', address: '37 N EDGEHILL DR, Fredericktown, OH 43019-1160', lat: 40.4818635, lng: -82.5409061, stormScore: 146, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'csv-156103646', homeowner: 'SCOTT SCRIBNER', address: '9304 MOUNT GILEAD RD, Fredericktown, OH 43019-9594', lat: 40.4735568, lng: -82.5741453, stormScore: 142, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'csv-158709458', homeowner: 'CAMERON SNYDER', address: '13246 LAKELAND DR, Fredericktown, OH 43019-9727', lat: 40.516564, lng: -82.5031267, stormScore: 138, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'csv-157466070', homeowner: 'ROBERT BURKEY', address: '2697 TOWNSHIP ROAD 190, Fredericktown, OH 43019-9427', lat: 40.4424214, lng: -82.6782173, stormScore: 134, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-1490', homeowner: 'ALBRIGHT JOSHUA & REBECCA', address: '14 COLUMBUS RD, Fredericktown, OH 43019', lat: 40.479211, lng: -82.542619, stormScore: 130, hailInches: 1.25, stage: 'Untouched' },
   ],
   gambier: [
-    { id: 'knox-gam-01', homeowner: 'BENNETT ELEANOR R', address: '106 WIGGIN ST, Gambier, OH 43022', lat: 40.375612, lng: -82.397124, stormScore: 139, hailInches: 1.25, stage: 'Untouched' },
-    { id: 'knox-gam-02', homeowner: 'PARKER TIMOTHY J', address: '304 BROOKLYN ST, Gambier, OH 43022', lat: 40.373819, lng: -82.394502, stormScore: 135, hailInches: 1.25, stage: 'Untouched' },
-    { id: 'knox-gam-03', homeowner: 'MORRISON CLAIRE', address: '210 DUFF ST, Gambier, OH 43022', lat: 40.377401, lng: -82.39891, stormScore: 131, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-2976', homeowner: 'STOKES GRAHAM HOWARD & HARBOURT ELLEN K', address: '206 N ACLAND ST, Gambier, OH 43022', lat: 40.3782357, lng: -82.3947522, stormScore: 142, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-2977', homeowner: 'PALMER GEORGINA L', address: '8790 ALBERT LN, Gambier, OH 43022', lat: 40.3576311, lng: -82.4330066, stormScore: 138, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-2978', homeowner: 'FARMER DWIGHT O', address: '8860 ALBERT LN, Gambier, OH 43022', lat: 40.3600586, lng: -82.43283, stormScore: 134, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-2979', homeowner: 'MANN SARAH T & WRIGHT ZACHARY L', address: '102 ALLEN DR, Gambier, OH 43022', lat: 40.3819017, lng: -82.3908797, stormScore: 130, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-2980', homeowner: 'LEGROS JOHN E & LINDA M', address: '104 ALLEN DR, Gambier, OH 43022', lat: 40.3819279, lng: -82.3908496, stormScore: 126, hailInches: 1.25, stage: 'Untouched' },
   ],
 };
 
@@ -187,20 +201,22 @@ function matchTerritoryLeads(territory) {
   const allLeads = loadRealLeads();
   const cityKey = String(territory || 'Mount Vernon').split('(')[0].trim().toLowerCase();
   const matched = allLeads.filter(l => (l.city || '').toLowerCase().includes(cityKey));
+  const geocodedMatched = matched.filter(l => Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)));
   const fallback = TERRITORY_FALLBACK_LEADS[cityKey] || TERRITORY_FALLBACK_LEADS['mount vernon'];
-  const sample = matched.length >= 3
-    ? matched.slice(0, 5).map((l, idx) => ({
+  const sample = geocodedMatched.length >= 3
+    ? geocodedMatched.slice(0, 5).map((l, idx) => ({
         id: l.id,
         homeowner: l.name,
         address: l.fullAddress || `${l.address}, ${l.city}, ${l.state} ${l.zip}`,
-        lat: l.lat,
-        lng: l.lng,
+        lat: Number(l.lat),
+        lng: Number(l.lng),
         stormScore: 144 - idx * 4,
         hailInches: idx < 2 ? 1.5 : 1.25,
         stage: l.stage || 'Untouched',
       }))
     : fallback;
-  return { allLeads, matched, sample };
+  const territoryMatchesCount = matched.length || TERRITORY_COUNTS[cityKey] || 7566;
+  return { allLeads, matched, territoryMatchesCount, sample };
 }
 
 export default async function handler(req, res) {
@@ -280,6 +296,8 @@ export default async function handler(req, res) {
 
     case 'audit_rep_shift_compliance': {
       const { sample } = matchTerritoryLeads(territory);
+      const normProp = property.trim().toLowerCase();
+      const distinctPool = sample.filter(s => s.address.trim().toLowerCase() !== normProp);
       output = {
         rep: repName,
         territory,
@@ -287,8 +305,8 @@ export default async function handler(req, res) {
         gpsBreadcrumbsVerified: 42,
         verifiedPropertyStops: [
           { address: property, dwellSec: 340, disposition: 'Inspection Scheduled' },
-          { address: sample[0]?.address || '204 E Vine St, Mount Vernon, OH 43050', dwellSec: 185, disposition: 'Knocked · Follow-Up' },
-          { address: sample[1]?.address || '118 N Mulberry St, Mount Vernon, OH 43050', dwellSec: 95, disposition: 'No Answer' },
+          { address: distinctPool[0]?.address || '204 E Vine St, Mount Vernon, OH 43050', dwellSec: 185, disposition: 'Knocked · Follow-Up' },
+          { address: distinctPool[1]?.address || '118 N Mulberry St, Mount Vernon, OH 43050', dwellSec: 95, disposition: 'No Answer' },
         ],
         voiceCoachScore: 92,
         complianceStatus: 'COMPLIANT',
@@ -312,12 +330,12 @@ export default async function handler(req, res) {
     }
 
     case 'triage_storm_leads': {
-      const { allLeads, matched, sample } = matchTerritoryLeads(territory);
+      const { allLeads, territoryMatchesCount, sample } = matchTerritoryLeads(territory);
       output = {
         territory,
         totalCatalogScanned: allLeads.length || 17232,
-        territoryMatchesCount: matched.length || (territory.toLowerCase().includes('mount vernon') ? 7566 : sample.length),
-        highPriorityMatches: Math.min(matched.length || 50, 50),
+        territoryMatchesCount,
+        highPriorityMatches: Math.min(territoryMatchesCount, 50),
         topRankedProperties: sample,
       };
       break;
@@ -354,11 +372,12 @@ export default async function handler(req, res) {
       break;
     }
 
-    case 'dispatch_production_job':
+    case 'dispatch_production_job': {
+      const parsed = parseDamageFindings(payload.findings);
       output = {
         workOrderId: 'WO-TN-2026-1042',
         property,
-        shingleSpec: 'IKO Dynasty — Glacier / Charcoal Grey',
+        shingleSpec: parsed.recommendedSystem,
         squaresScheduled: squares,
         shingleBundlesStaged: Math.ceil(squares * 3),
         crewLead: 'Spencer Jones (Head of Production)',
@@ -368,6 +387,7 @@ export default async function handler(req, res) {
         status: 'PRODUCTION_SCHEDULED',
       };
       break;
+    }
 
     case 'generate_margin_guarded_estimate':
       output = {

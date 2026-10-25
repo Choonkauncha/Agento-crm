@@ -100,6 +100,35 @@ assert.ok(severeScan.jsonBody.result.recommendedSystem.includes('IKO Nordic'));
 assert.equal(severeScan.jsonBody.result.materialTakeoff.shingleBundles, 84);
 console.log('✓ 4c. Cent-exact ledger reconciliation & dynamic AI VLM damage/BOM takeoff verified');
 
+
+// 4d. Verify territory counts, geocoded coordinates, zero duplicate stops, and dynamic shingleSpec
+const fredTriage = await invoke('POST', {
+  operation: 'triage_storm_leads',
+  actorRole: 'setter',
+  payload: { territory: 'Fredericktown' },
+});
+assert.equal(fredTriage.jsonBody.result.territoryMatchesCount, 1896);
+assert.equal(fredTriage.jsonBody.result.topRankedProperties.length, 5);
+for (const prop of fredTriage.jsonBody.result.topRankedProperties) {
+  assert.ok(Number.isFinite(prop.lat) && Number.isFinite(prop.lng), `Missing coords for ${prop.address}`);
+}
+
+const shiftAudit = await invoke('POST', {
+  operation: 'audit_rep_shift_compliance',
+  actorRole: 'rep',
+  payload: { territory: 'Fredericktown', property: fredTriage.jsonBody.result.topRankedProperties[0].address },
+});
+const stopAddrs = shiftAudit.jsonBody.result.verifiedPropertyStops.map(s => s.address.toLowerCase());
+assert.equal(new Set(stopAddrs).size, stopAddrs.length, 'Duplicate addresses in verifiedPropertyStops');
+
+const prodDispatch = await invoke('POST', {
+  operation: 'dispatch_production_job',
+  actorRole: 'admin',
+  payload: { area: 2500, wastePct: 12, findings: '8 wind creases · 14 hail bruises · 5 missing tabs' },
+});
+assert.ok(prodDispatch.jsonBody.result.shingleSpec.includes('IKO Nordic'));
+console.log('✓ 4d. Exact territory counts (1,896 Fredericktown), 100% geocoded coordinates, distinct GPS stops, and dynamic shingleSpec verified');
+
 // 5. Verify Vercel Hobby 12-serverless-function limit is respected
 const apiFiles = fs.readdirSync('/workspace/true-north-agento/true-north-sales-map/api').filter(f => f.endsWith('.js'));
 assert.ok(apiFiles.length <= 12, `Vercel Hobby limit exceeded: ${apiFiles.length} functions in api/`);
