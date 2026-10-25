@@ -54,6 +54,7 @@ function mountNavigation() {
     ["training", "/training", "Training"],
     ["shifts", "/shifts", "Shifts"],
     ["account", "/account", "My account"],
+    ["agento", "/agento", "Agento Hub"],
     ["management", "/admin", "Management"],
   ];
   const brandHref = page === "/setter" ? "/account.html" : "/";

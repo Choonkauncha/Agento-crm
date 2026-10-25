@@ -57,7 +57,7 @@ function render() {
     app.innerHTML = `<p class="tnProgress">${esc(who)}</p><h1 class="tnTitle">Appointment setter</h1><p class="tnSub">Photos are for sales reps. You can still send inspections, fill forms assigned to you, and message management.</p><div class="tnStack">${homeLinks(role)}</div>`;
     return;
   }
-  app.innerHTML = `${ctx.mode === "local" ? '<div class="tnBanner">Saved on this phone until Supabase storage is connected.</div>' : ""}<section class="profileHero" data-role="salesperson"><div><div class="eyebrow">PROPERTY DOCUMENTATION</div><h1 class="tnTitle">Every inspection, documented.</h1><p>${esc(who)} · Search a property to add photos or complete a form.</p></div></section><section class="tnCard propertySearchCard" data-tn-panel="rep-search" data-tn-rank="primary"><h2>Find a property</h2><label class="tnLabel" for="q">Find a property</label><input class="tnInput" id="q" placeholder="Search address or homeowner" autocomplete="off"><p class="tnHelp">Enter at least two characters. Your photos and forms stay attached to the property.</p><div id="hits" class="tnStack" aria-live="polite"></div></section><section data-tn-panel="rep-photos" data-tn-rank="secondary"><div class="profileSectionHead"><h2>Property photo bank</h2><span>Organized by address</span></div><div id="groups" class="tnStack"></div></section><section class="profileSection"><div class="profileSectionHead"><h2>Field tools</h2></div><div class="roleToolsGrid">${homeLinks(role)}${ctx.rep && (ctx.rep.role === "admin" || ctx.rep.role === "manager") ? '<a class="tnTap" href="/files.html">Files & Forms</a>' : ""}</div></section>`;
+  app.innerHTML = `${ctx.mode === "local" ? '<div class="tnBanner">Saved on this phone until Supabase storage is connected.</div>' : ""}<section class="profileHero" data-role="salesperson"><div><div class="eyebrow">PROPERTY DOCUMENTATION</div><h1 class="tnTitle">Every inspection, documented.</h1><p>${esc(who)} · Search a property to add photos or complete a form.</p></div></section><section class="tnCard propertySearchCard" data-tn-panel="rep-search" data-tn-rank="primary"><h2>Find a property</h2><label class="tnLabel" for="q">Find a property</label><input class="tnInput" id="q" placeholder="Search address or homeowner" autocomplete="off"><p class="tnHelp">Enter at least two characters. Your photos and forms stay attached to the property.</p><div id="hits" class="tnStack" aria-live="polite"></div></section><section data-tn-panel="rep-photos" data-tn-rank="secondary"><div class="profileSectionHead"><h2>Property photo bank</h2><span>Organized by address</span></div><div id="groups" class="tnStack"></div></section><section class="tnCard" data-tn-panel="rep-quote" data-tn-rank="secondary"><h2>Instant 35%-Margin Roof Quote &amp; 1099 Commission Estimator</h2><p class="tnHelp">Generate a Good / Better / Best IKO shingle quote and see your 10% GP 1099 commission on the spot.</p><form id="repInstantQuoteForm" class="tnStack" style="margin-top:10px"><label class="tnLabel" for="repQuoteArea">Roof Area (sq ft)</label><input class="tnInput" id="repQuoteArea" type="number" value="2400" min="600" max="25000" step="50"><label class="tnLabel" for="repQuoteWaste">Waste % (Pitch/Complexity)</label><input class="tnInput" id="repQuoteWaste" type="number" value="12" min="5" max="30"><button type="submit" class="tnTap dark">Calculate Good / Better / Best Quote</button></form><div id="repQuoteOutput" class="tnStack" style="margin-top:12px"></div></section><section class="profileSection"><div class="profileSectionHead"><h2>Field tools</h2></div><div class="roleToolsGrid">${homeLinks(role)}${ctx.rep && (ctx.rep.role === "admin" || ctx.rep.role === "manager") ? '<a class="tnTap" href="/files.html">Files & Forms</a>' : ""}</div></section>`;
   const input = document.getElementById("q");
   let timer;
   input.oninput = () => {
@@ -65,6 +65,32 @@ function render() {
     timer = setTimeout(() => runSearch(input.value), 200);
   };
   loadGroups(true);
+  bindRepQuote();
+}
+
+function bindRepQuote() {
+  const form = document.getElementById("repInstantQuoteForm");
+  const out = document.getElementById("repQuoteOutput");
+  if (!form || !out) return;
+  const compute = () => {
+    const area = Number(document.getElementById("repQuoteArea")?.value || 2400);
+    const waste = Number(document.getElementById("repQuoteWaste")?.value || 12);
+    const squares = Number(((area * (1 + waste / 100)) / 100).toFixed(2));
+    const tiers = [
+      { name: "Good · IKO Cambridge", rate: 265 },
+      { name: "Better · IKO Dynasty (Class 3)", rate: 283 },
+      { name: "Best · IKO Nordic (Class 4)", rate: 318 }
+    ];
+    out.innerHTML = tiers.map(t => {
+      const cost = squares * t.rate + 650;
+      const price = Math.round(cost / 0.65);
+      const gp = Math.round(price - cost);
+      const comm = (gp * 0.10).toFixed(2);
+      return `<div class="tnCard"><b>${t.name}: ${price.toLocaleString()}</b><span>${squares} sq (w/ ${waste}% waste) · 35% Gross Margin · Your 1099 Commission: ${Number(comm).toLocaleString()}</span></div>`;
+    }).join("");
+  };
+  form.onsubmit = (e) => { e.preventDefault(); compute(); };
+  compute();
 }
 
 let searchGeneration = 0;

@@ -1,3 +1,4 @@
+import { mountAgentoAdmin } from './tn-files/agento-admin.js';
 import { mountSchedulingAdmin } from './tn-files/scheduling-admin.js';
 import { mountCoachAdmin } from './tn-files/coach-admin.js';
 import { mountFeatureAdmin } from './tn-files/feature-admin.js';
@@ -230,6 +231,7 @@ async function enterSession(s) {
   mountFeatureAdmin(sb,me);
   mountCoachAdmin(sb,me);
   mountSchedulingAdmin(sb,me);
+  mountAgentoAdmin(sb,me);
   rememberAdminRole(s.user, profile.role);
   await loadData();
   if (!isCurrent()) return;
@@ -672,7 +674,7 @@ function showTab(tab, options) {
 function applyAdminHash() {
   const target = adminHashTarget(location.hash);
   const tab = target.tab || 'overview';
-  if (["accounts", "features", "coach-settings", "scheduling"].includes(tab)) {
+  if (["accounts", "features", "coach-settings", "scheduling", "agento"].includes(tab)) {
     const button = document.querySelector(`#app [data-tab="${tab}"]`);
     if (button) button.click();
     else showTab('overview', { historyMode: 'replace' });

@@ -12,7 +12,8 @@ export const MAP_TOOLS=[
  {name:'remove_route_stop',description:'Remove a specific address or stop ID from the current route, including during navigation. Read live context to find the exact address first.',parameters:{type:'OBJECT',properties:{stop:{type:'STRING'}},required:['stop']}},
  {name:'route_navigation',description:'Start, pause, resume or end in-app route navigation when asked.',parameters:{type:'OBJECT',properties:{action:{type:'STRING',enum:['start','pause','resume','end']}},required:['action']}},
  {name:'select_visible_addresses',description:'Add all mapped addresses matching the current map filters to the route, up to its capacity.',parameters:{type:'OBJECT',properties:{}}},
- {name:'recent_ohio_storms',description:'Fetch recent NOAA storm reports across Ohio and active warnings. Use this for recent storm questions. Reports are preliminary and do not prove damage to any roof.',parameters:{type:'OBJECT',properties:{days:{type:'NUMBER',description:'Report days to check, 1–7, default 3'}}}}
+ {name:'recent_ohio_storms',description:'Fetch recent NOAA storm reports across Ohio and active warnings. Use this for recent storm questions. Reports are preliminary and do not prove damage to any roof.',parameters:{type:'OBJECT',properties:{days:{type:'NUMBER',description:'Report days to check, 1–7, default 3'}}}},
+ {name:'generate_margin_guarded_estimate',description:'Generate a 35%-gross-margin-guarded Good/Better/Best IKO roof proposal and 1099 rep commission split for a property roof area in sq ft.',parameters:{type:'OBJECT',properties:{property:{type:'STRING'},area:{type:'NUMBER',description:'Roof area in sq ft, 600–25000'},wastePct:{type:'NUMBER',description:'Waste percentage, 5–30, default 12'}},required:['area']}}
 ];
 export function validateMapTool(call){
  const name=call?.name,args=call?.args||{};
@@ -37,6 +38,11 @@ export function validateMapTool(call){
  if(name==='route_navigation'){
   if(!['start','pause','resume','end'].includes(args.action))throw Error('Invalid navigation action.');
   return {name,args:{action:args.action}};
+ }
+ if(name==='generate_margin_guarded_estimate'){
+  const area=Number(args.area??2400);if(!Number.isFinite(area)||area<600||area>25000)throw Error('Roof area must be 600–25000 sq ft.');
+  const wastePct=Number(args.wastePct??12);if(!Number.isFinite(wastePct)||wastePct<5||wastePct>30)throw Error('Waste percentage must be 5–30.');
+  return {name,args:{property:typeof args.property==='string'?args.property.trim():'513 South McKenzie St, Mount Vernon, OH 43050',area,wastePct}};
  }
  if(name==='recent_ohio_storms'){
   const days=args.days??3;if(!Number.isInteger(days)||days<1||days>7)throw Error('Storm days must be 1–7.');

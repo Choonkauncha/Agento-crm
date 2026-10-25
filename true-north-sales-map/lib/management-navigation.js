@@ -8,7 +8,8 @@ export const MANAGEMENT_GROUPS = [
   ['personal', 'Your account'],
 ];
 export const MANAGEMENT_DESTINATIONS = {
-  overview: { group: 'daily', label: 'Overview', description: 'Upcoming inspections, team activity, and items needing attention.', keywords: 'dashboard today summary home' },
+  overview: { group: 'daily', label: 'Overview',
+  agento: { group: 'daily', label: 'Agento & Finance', description: 'Run 35%-margin Good/Better/Best roof proposals, 1099 rep commissions, and Agento HR/Construction/Finance skills.', keywords: 'agento finance commissions proposals estimate margin roof ai' }, description: 'Upcoming inspections, team activity, and items needing attention.', keywords: 'dashboard today summary home' },
   appointments: { group: 'daily', label: 'Appointments', description: 'Review inspections, sales assignments, and appointment progress.', keywords: 'inspection schedule handoff salesperson unassigned' },
   homeowners: { group: 'daily', label: 'Homeowner requests', description: 'Review new requests and homeowner contact information.', keywords: 'inbound homeowner leads contact property' },
   activity: { group: 'daily', label: 'Activity feed', description: 'Review field actions and inspection handoffs across the team.', keywords: 'audit trail reports history all events status changes' },
