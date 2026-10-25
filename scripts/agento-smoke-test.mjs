@@ -72,7 +72,7 @@ console.log('=== ALL 13 AGENTO INTEGRATION & CRM CHECKS PASSED ===');
 // 5. Headless Chromium UI Smoke Check across /agento.html, /admin.html#agento (tn-files/agento-admin.js), and /rep.html Quote Estimator
 import http from 'node:http';
 import path from 'node:path';
-import { chromium } from 'playwright';
+import { chromium } from '../true-north-sales-map/node_modules/playwright/index.mjs';
 
 const webRoot = '/workspace/true-north-agento/true-north-sales-map';
 const mime = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.webp': 'image/webp', '.png': 'image/png' };

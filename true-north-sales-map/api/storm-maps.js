@@ -2,7 +2,7 @@ import { NWS_USER_AGENT } from '../lib/weather.js';
 import { NWS_AREA_ALERTS, RAINVIEWER_MAPS, SPC_REPORTS, buildStormPack } from '../lib/storm-maps.js';
 
 const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=600' };
-const json = (body) => new Response(JSON.stringify(body), { status: 200, headers });
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
 
 async function pullJson(url, extraHeaders) {
   try {
@@ -28,7 +28,19 @@ async function pullText(url) {
 }
 
 export default {
-  async fetch() {
+  async fetch(request) {
+    const u = request?.url ? new URL(request.url, 'https://truenorth.local') : null;
+    if (u && u.searchParams.get('mode') === 'alerts') {
+      const area = u.searchParams.get('state') || 'OH';
+      const data = await pullJson(`${NWS_AREA_ALERTS}?area=${encodeURIComponent(area)}`, {
+        accept: 'application/geo+json',
+        'user-agent': NWS_USER_AGENT
+      });
+      if (!data) return json({ features: [] });
+      const events = ['Tornado Warning', 'Tornado Watch', 'Severe Thunderstorm Warning', 'Severe Thunderstorm Watch', 'Special Weather Statement', 'High Wind Warning', 'Wind Advisory', 'Hail'];
+      data.features = (data.features || []).filter(f => events.some(e => String(f.properties?.event || '').toLowerCase().includes(e.toLowerCase())));
+      return json(data);
+    }
     const [radarData, alertData, ...csvTexts] = await Promise.all([
       pullJson(RAINVIEWER_MAPS, { accept: 'application/json', 'user-agent': NWS_USER_AGENT }),
       pullJson(`${NWS_AREA_ALERTS}?area=OH`, { accept: 'application/geo+json', 'user-agent': NWS_USER_AGENT }),
