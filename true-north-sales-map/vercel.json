@@ -94,10 +94,5 @@
         }
       ]
     }
-  ],
-  "functions": {
-    "api/agento.js": {
-      "includeFiles": "data/leads.json"
-    }
-  }
+  ]
 }
