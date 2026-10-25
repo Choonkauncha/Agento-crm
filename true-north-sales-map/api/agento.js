@@ -5,13 +5,24 @@ import { fileURLToPath } from 'node:url';
 let cachedLeads = null;
 function loadRealLeads() {
   if (cachedLeads) return cachedLeads;
-  try {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const raw = fs.readFileSync(path.join(here, '../data/leads.json'), 'utf8');
-    cachedLeads = JSON.parse(raw);
-  } catch {
-    cachedLeads = [];
+  const candidates = [
+    new URL('../data/leads.json', import.meta.url),
+    path.resolve(process.cwd(), 'data/leads.json'),
+    path.resolve(process.cwd(), 'true-north-sales-map/data/leads.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const raw = fs.readFileSync(candidate, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedLeads = parsed;
+        return cachedLeads;
+      }
+    } catch {
+      // try next path
+    }
   }
+  cachedLeads = [];
   return cachedLeads;
 }
 
