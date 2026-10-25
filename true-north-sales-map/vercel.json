@@ -2,6 +2,10 @@
   "cleanUrls": true,
   "rewrites": [
     {
+      "source": "/api/storms",
+      "destination": "/api/storm-maps?mode=alerts"
+    },
+    {
       "source": "/agento",
       "destination": "/agento.html"
     },

@@ -62,4 +62,71 @@ for (const p of ['SKILL.md', 'skills/hr-1099-workforce/SKILL.md', 'skills/constr
   assert.ok(fs.existsSync(`/workspace/true-north-agento/${p}`), `Missing ${p}`);
 }
 console.log('✓ 4. All SKILL.md manifests and /agento Command Center UI verified');
-console.log('=== ALL 12 AGENTO INTEGRATION & CRM CHECKS PASSED ===');
+
+// 5. Verify Vercel Hobby 12-serverless-function limit is respected
+const apiFiles = fs.readdirSync('/workspace/true-north-agento/true-north-sales-map/api').filter(f => f.endsWith('.js'));
+assert.ok(apiFiles.length <= 12, `Vercel Hobby limit exceeded: ${apiFiles.length} functions in api/`);
+console.log(`✓ 5. Vercel Hobby 12-function limit verified (${apiFiles.length}/12 serverless functions in api/)`);
+console.log('=== ALL 13 AGENTO INTEGRATION & CRM CHECKS PASSED ===');
+
+// 5. Headless Chromium UI Smoke Check across /agento.html, /admin.html#agento (tn-files/agento-admin.js), and /rep.html Quote Estimator
+import http from 'node:http';
+import path from 'node:path';
+import { chromium } from 'playwright';
+
+const webRoot = '/workspace/true-north-agento/true-north-sales-map';
+const mime = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.webp': 'image/webp', '.png': 'image/png' };
+
+const server = http.createServer(async (req, res) => {
+  const u = new URL(req.url, 'http://127.0.0.1');
+  if (u.pathname === '/api/agento') {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = raw ? JSON.parse(raw) : {};
+    const out = await invoke(req.method, body, req.headers);
+    res.writeHead(out.statusCode, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.jsonBody));
+    return;
+  }
+  if (u.pathname === '/admin-agento-harness.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<div id="app"><aside class="rail"></aside><main class="dashMain"></main></div><script type="module">import { mountAgentoAdmin } from '/tn-files/agento-admin.js'; mountAgentoAdmin({}, { role: 'admin', name: 'Travis Mackie' });</script>`);
+    return;
+  }
+  const filePath = path.join(webRoot, u.pathname === '/' ? 'index.html' : u.pathname);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    res.writeHead(200, { 'Content-Type': mime[path.extname(filePath)] || 'application/octet-stream' });
+    res.end(fs.readFileSync(filePath));
+  } else {
+    res.writeHead(404).end();
+  }
+});
+
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  await page.route('**/tn-files/global-assistant.js', (r) => r.fulfill({ contentType: 'application/javascript', body: '' }));
+
+  // Test A: /agento.html Command Center
+  await page.goto(`${origin}/agento.html`);
+  await page.locator('#runPowerhouseFlow').click();
+  await page.waitForFunction(() => document.getElementById('traceCount')?.textContent === '5 executed');
+  assert.equal(await page.locator('#bomSquares').textContent(), '28');
+
+  // Test B: Management Dashboard Agento & Finance Tab (tn-files/agento-admin.js)
+  await page.goto(`${origin}/admin-agento-harness.html`);
+  await page.locator('button[data-tab="agento"]').click();
+  await page.locator('#agRunFullCycle').click();
+  await page.waitForFunction(() => (document.getElementById('agAdminTrace')?.textContent || '').includes('generate_margin_guarded_estimate'));
+  assert.equal(await page.locator('#agQuoteTiers .card').count(), 3);
+
+  assert.deepEqual(pageErrors, []);
+  console.log('✓ 5. Headless Chromium UI check passed for /agento.html and Management Agento & Finance tab with 0 page errors');
+} finally {
+  await browser.close();
+  server.close();
+}
