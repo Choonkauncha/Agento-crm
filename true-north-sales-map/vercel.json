@@ -1,22 +1,94 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    {"source":"/homeowner","destination":"/homeowner.html"},
-    {"source":"/setter","destination":"/setter.html"},
-    {"source":"/admin","destination":"/admin.html"},
-    {"source":"/shifts","destination":"/shifts.html"},
-    {"source":"/rep","destination":"/rep.html"},
-    {"source":"/photo","destination":"/photo.html"},
-    {"source":"/forms","destination":"/forms.html"},
-    {"source":"/files","destination":"/files.html"},
-    {"source":"/form-print","destination":"/form-print.html"},
-    {"source":"/account","destination":"/account.html"},
-    {"source":"/training","destination":"/training.html"},
-    {"source":"/reset-password","destination":"/reset-password.html"}
+    {
+      "source": "/agento",
+      "destination": "/agento.html"
+    },
+    {
+      "source": "/homeowner",
+      "destination": "/homeowner.html"
+    },
+    {
+      "source": "/setter",
+      "destination": "/setter.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/shifts",
+      "destination": "/shifts.html"
+    },
+    {
+      "source": "/rep",
+      "destination": "/rep.html"
+    },
+    {
+      "source": "/photo",
+      "destination": "/photo.html"
+    },
+    {
+      "source": "/forms",
+      "destination": "/forms.html"
+    },
+    {
+      "source": "/files",
+      "destination": "/files.html"
+    },
+    {
+      "source": "/form-print",
+      "destination": "/form-print.html"
+    },
+    {
+      "source": "/account",
+      "destination": "/account.html"
+    },
+    {
+      "source": "/training",
+      "destination": "/training.html"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/reset-password.html"
+    }
   ],
   "headers": [
-    {"source":"/vendor/ffmpeg/(.*)","headers":[{"key":"Content-Type","value":"text/javascript; charset=utf-8"}]},
-    {"source":"/data/(city-centers|manifest).json","headers":[{"key":"Cache-Control","value":"public, max-age=86400, stale-while-revalidate=604800"}]},
-    {"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Referrer-Policy","value":"strict-origin-when-cross-origin"},{"key":"X-Frame-Options","value":"SAMEORIGIN"}] }
+    {
+      "source": "/vendor/ffmpeg/(.*)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/javascript; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/data/(city-centers|manifest).json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
+    }
   ]
 }
