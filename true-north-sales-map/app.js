@@ -3424,6 +3424,20 @@ async function executeMapAssistantAction(name,args){
   if(name==='select_visible_addresses'){
     selectClusterAddresses({leadIds:state.filtered.filter(isCoords).map(lead=>lead.id)});return {status:'selected',executed:true,selectedCount:state.selected.size,limit:ROUTE_STOP_LIMIT};
   }
+  if(name==='generate_margin_guarded_estimate'){
+    const area=Math.min(Math.max(Number(args.area||2500),400),50000);
+    const wastePct=Math.min(Math.max(Number(args.wastePct??12),5),35);
+    const targetMarginPct=Math.min(Math.max(Number(args.targetMarginPct??35),30),65);
+    const squares=Number(((area*(1+wastePct/100))/100).toFixed(2));
+    const calc=(rate)=>{
+      const cost=Number((squares*rate+650).toFixed(2));
+      const price=Number((cost/(1-targetMarginPct/100)).toFixed(2));
+      const gp=Number((price-cost).toFixed(2));
+      return {price,gp,comm:Number((gp*0.10).toFixed(2))};
+    };
+    const good=calc(265),better=calc(283),best=calc(318);
+    return {status:'estimated',executed:true,squares,targetMarginPct,goodPrice:good.price,betterPrice:better.price,bestPrice:best.price,repCommission1099:better.comm};
+  }
   throw Error('Unsupported map command.');
 }
 

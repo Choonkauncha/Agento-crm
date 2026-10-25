@@ -32,6 +32,7 @@ export function commandResultText(result){
  if(result?.status==='built')return `${result.stops} houses · ${result.estimatedMinutes?`about ${result.estimatedMinutes} minutes including visits`:'route built'}.${result.approximate?' Estimate only; review before navigating.':''}`;
  if(result?.status==='cleared')return `Route cleared. ${result.removed} selected houses removed.`;
  if(result?.status==='selected')return `${result.selectedCount} houses selected. Ready to build.`;
+ if(result?.status==='estimate_generated')return `${result.squaresWithWaste} sq IKO Dynasty quote: ${Math.round(result.quotedPrice).toLocaleString()} (35% margin · ${result.projected1099Commission} rep commission).`;
  if(result?.status==='removed')return `Stop removed. ${result.remaining} houses remain.`;
  if(result?.status==='not_started')return 'Navigation could not start. Check location access.';
  if(result?.status)return `Navigation ${result.status}.`;

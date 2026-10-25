@@ -26,14 +26,105 @@ function loadRealLeads() {
   return cachedLeads;
 }
 
-/**
- * True North Sales Map — Unified Agento Skill Gateway (/api/agento)
- * Exposes HR (1099 shift GPS & coaching), Construction (17,177 geocoded storm-lead routes & VLM roof scan),
- * and Finance (margin-guarded instant roof estimates & 1099 commission ledger) operations to Agento.
- */
+const IKO_TIERS = {
+  good_iko_cambridge: { label: 'Good · IKO Cambridge Architectural', ratePerSq: 265, fixedOverhead: 650 },
+  better_iko_dynasty: { label: 'Better · IKO Dynasty (Class 3 Impact Rated)', ratePerSq: 283, fixedOverhead: 650 },
+  best_iko_nordic_impact: { label: 'Best · IKO Nordic (Class 4 Impact Rated)', ratePerSq: 318, fixedOverhead: 650 },
+};
+
+export function computeRoofProposal({ area = 2500, wastePct = 12, targetMarginPct = 35 } = {}) {
+  const cleanArea = Math.min(25000, Math.max(600, Number(area) || 2500));
+  const cleanWaste = Math.min(30, Math.max(5, Number(wastePct ?? 12)));
+  const requestedMarginPct = Number(targetMarginPct ?? 35);
+  const effectiveMarginPct = Math.min(65, Math.max(requestedMarginPct, 30));
+  const squares = Number(((cleanArea * (1 + cleanWaste / 100)) / 100).toFixed(2));
+  const marginDivisor = 1 - effectiveMarginPct / 100;
+
+  const tierBreakdown = {};
+  const tiers = {};
+  for (const [key, cfg] of Object.entries(IKO_TIERS)) {
+    const directCost = Number((squares * cfg.ratePerSq + cfg.fixedOverhead).toFixed(2));
+    const quotedPrice = Number((directCost / marginDivisor).toFixed(2));
+    const grossProfit = Number((quotedPrice - directCost).toFixed(2));
+    const grossMarginPct = Number(((grossProfit / quotedPrice) * 100).toFixed(1));
+    const repCommission10Pct = Number((grossProfit * 0.10).toFixed(2));
+    tiers[key] = quotedPrice;
+    tierBreakdown[key] = {
+      label: cfg.label,
+      ratePerSq: cfg.ratePerSq,
+      fixedOverhead: cfg.fixedOverhead,
+      directCost,
+      quotedPrice,
+      grossProfit,
+      grossMarginPct,
+      repCommission10Pct,
+    };
+  }
+
+  const primary = tierBreakdown.better_iko_dynasty;
+  return {
+    area: cleanArea,
+    wastePct: cleanWaste,
+    squares,
+    requestedMarginPct,
+    targetMarginPct: effectiveMarginPct,
+    marginFloorClamped: requestedMarginPct < 30,
+    directCost: primary.directCost,
+    quotedPrice: primary.quotedPrice,
+    grossProfit: primary.grossProfit,
+    grossMarginPct: primary.grossMarginPct,
+    commission1099: primary.repCommission10Pct,
+    setterBonus: 150.0,
+    tiers,
+    tierBreakdown,
+  };
+}
+
+function parseDamageFindings(findingsStr = '') {
+  const text = String(findingsStr || '6 wind creases · 9 hail bruisings · 3 missing tabs');
+  const windMatch = text.match(/(\d+)\s*wind/i);
+  const hailMatch = text.match(/(\d+)\s*hail/i);
+  const missingMatch = text.match(/(\d+)\s*(?:missing|tab|shingle)/i);
+  const windCount = windMatch ? Number(windMatch[1]) : 6;
+  const hailCount = hailMatch ? Number(hailMatch[1]) : 9;
+  const missingCount = missingMatch ? Number(missingMatch[1]) : 3;
+  const totalPoints = windCount + hailCount + missingCount * 2;
+  let severity = 'Full Replacement Recommended (Insurance Restorable)';
+  let recommendedSystem = 'IKO Dynasty Architectural (Class 3 Impact Rated)';
+  if (totalPoints < 4) {
+    severity = 'Preventative Maintenance & Pipe Boot / Sealant Service';
+    recommendedSystem = 'IKO Cambridge Architectural Repair Kit';
+  } else if (totalPoints < 10) {
+    severity = 'Targeted Slope Repair / Partial Replacement Evaluation';
+    recommendedSystem = 'IKO Cambridge Architectural (Slope Match)';
+  } else if (hailCount >= 12) {
+    severity = 'Severe Hail Impact — Full Replacement Recommended (Insurance Restorable)';
+    recommendedSystem = 'IKO Nordic Performance (Class 4 Impact Rated)';
+  }
+  return { text, windCount, hailCount, missingCount, severity, recommendedSystem };
+}
+
+const TERRITORY_FALLBACK_LEADS = {
+  'mount vernon': [
+    { id: 'csv-158467647', homeowner: 'JEFFREY TOWNSEND', address: '7929 MARTINSBURG RD, Mount Vernon, OH 43050-9074', lat: 40.3482712, lng: -82.4358394, stormScore: 144, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'csv-154626719', homeowner: 'CARLA SKAL', address: '20 PARROTT ST, Mount Vernon, OH 43050-4520', lat: 40.3753376, lng: -82.4867023, stormScore: 140, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'csv-156960266', homeowner: 'LAUREL MCDONALD', address: '108 CLIFF ST, Mount Vernon, OH 43050-4148', lat: 40.3816597, lng: -82.4814359, stormScore: 136, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-5128', homeowner: 'HARRINGTON LORI A', address: '6 1/2 BURGESS ST, Mount Vernon, OH 43050', lat: 40.397451, lng: -82.485836, stormScore: 132, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-5129', homeowner: 'SMITH VICTORIA & CODY', address: '300 1/2 CALHOUN ST, Mount Vernon, OH 43050', lat: 40.4010342, lng: -82.4889852, stormScore: 128, hailInches: 1.25, stage: 'Untouched' },
+  ],
+  fredericktown: [
+    { id: 'knox-fred-01', homeowner: 'MILLER DOUGLAS & KAREN', address: '142 N MAIN ST, Fredericktown, OH 43019', lat: 40.484112, lng: -82.543218, stormScore: 146, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'knox-fred-02', homeowner: 'SNYDER ROBERT L', address: '88 SALEM AVE, Fredericktown, OH 43019', lat: 40.480915, lng: -82.547104, stormScore: 141, hailInches: 1.5, stage: 'Untouched' },
+    { id: 'knox-fred-03', homeowner: 'YODER BENJAMIN', address: '215 HIGH ST, Fredericktown, OH 43019', lat: 40.482744, lng: -82.540812, stormScore: 137, hailInches: 1.25, stage: 'Untouched' },
+  ],
+  gambier: [
+    { id: 'knox-gam-01', homeowner: 'BENNETT ELEANOR R', address: '106 WIGGIN ST, Gambier, OH 43022', lat: 40.375612, lng: -82.397124, stormScore: 139, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-gam-02', homeowner: 'PARKER TIMOTHY J', address: '304 BROOKLYN ST, Gambier, OH 43022', lat: 40.373819, lng: -82.394502, stormScore: 135, hailInches: 1.25, stage: 'Untouched' },
+    { id: 'knox-gam-03', homeowner: 'MORRISON CLAIRE', address: '210 DUFF ST, Gambier, OH 43022', lat: 40.377401, lng: -82.39891, stormScore: 131, hailInches: 1.25, stage: 'Untouched' },
+  ],
+};
 
 const OPERATIONS = {
-  // HR & Workforce Operations
   onboard_1099_rep: {
     domain: 'HR',
     riskTier: 'medium',
@@ -52,8 +143,6 @@ const OPERATIONS = {
     requiredRole: 'admin',
     description: 'Dispatch a multi-stop Knox County / Mount Vernon storm canvass route to an active field rep or setter.',
   },
-
-  // Construction & Field Operations
   triage_storm_leads: {
     domain: 'Construction',
     riskTier: 'low',
@@ -72,8 +161,6 @@ const OPERATIONS = {
     requiredRole: 'admin',
     description: 'Promote a signed roof replacement estimate into an active production work order with material takeoff.',
   },
-
-  // Finance & Revenue Operations
   generate_margin_guarded_estimate: {
     domain: 'Finance',
     riskTier: 'medium',
@@ -96,6 +183,26 @@ const OPERATIONS = {
 
 const ROLE_RANK = { setter: 1, rep: 2, admin: 3 };
 
+function matchTerritoryLeads(territory) {
+  const allLeads = loadRealLeads();
+  const cityKey = String(territory || 'Mount Vernon').split('(')[0].trim().toLowerCase();
+  const matched = allLeads.filter(l => (l.city || '').toLowerCase().includes(cityKey));
+  const fallback = TERRITORY_FALLBACK_LEADS[cityKey] || TERRITORY_FALLBACK_LEADS['mount vernon'];
+  const sample = matched.length >= 3
+    ? matched.slice(0, 5).map((l, idx) => ({
+        id: l.id,
+        homeowner: l.name,
+        address: l.fullAddress || `${l.address}, ${l.city}, ${l.state} ${l.zip}`,
+        lat: l.lat,
+        lng: l.lng,
+        stormScore: 144 - idx * 4,
+        hailInches: idx < 2 ? 1.5 : 1.25,
+        stage: l.stage || 'Untouched',
+      }))
+    : fallback;
+  return { allLeads, matched, sample };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -108,7 +215,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     return res.status(200).json({
       platform: 'True North Field OS — Agento Unified Suite',
-      version: '2.1.0-agento',
+      version: '2.2.0-agento',
       domains: ['HR', 'Construction', 'Finance'],
       stats: [
         { label: 'Hours saved', value: '30–40 hrs/week' },
@@ -147,22 +254,19 @@ export default async function handler(req, res) {
   const repName = payload.name || 'Jordan Miller (1099 Sales Rep)';
   const territory = payload.territory || 'Mount Vernon';
   const property = payload.property || '513 South McKenzie St, Mount Vernon, OH 43050';
-  const area = Number(payload.area || 2400);
-  const wastePct = Number(payload.wastePct ?? 12);
-  const squares = Number(((area * (1 + wastePct / 100)) / 100).toFixed(2));
-  const directCost = Number((squares * 283 + 650).toFixed(2));
-  const requestedMarginPct = Number(payload.targetMarginPct ?? 35);
-  const targetMarginPct = Math.max(requestedMarginPct, 30);
-  const quotedPrice = Number((directCost / (1 - targetMarginPct / 100)).toFixed(2));
-  const grossProfit = Number((quotedPrice - directCost).toFixed(2));
-  const commission1099 = Number((grossProfit * 0.10).toFixed(2));
-  const setterBonus = 150.00;
+  const quote = computeRoofProposal({
+    area: payload.area ?? 2500,
+    wastePct: payload.wastePct ?? 12,
+    targetMarginPct: payload.targetMarginPct ?? 35,
+  });
+
+  const { squares, directCost, quotedPrice, grossProfit, grossMarginPct, requestedMarginPct, marginFloorClamped, commission1099, setterBonus, tiers, tierBreakdown } = quote;
 
   let output = {};
   switch (operation) {
     case 'onboard_1099_rep':
       output = {
-        contractorId: 'rep_' + repName.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 18),
+        contractorId: 'rep_' + repName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 18),
         name: repName,
         classification: '1099 Independent Contractor',
         assignedTerritory: territory,
@@ -174,110 +278,45 @@ export default async function handler(req, res) {
       };
       break;
 
-    case 'audit_rep_shift_compliance':
+    case 'audit_rep_shift_compliance': {
+      const { sample } = matchTerritoryLeads(territory);
       output = {
         rep: repName,
+        territory,
         shiftWindowET: '4:30 PM – 6:00 PM ET',
         gpsBreadcrumbsVerified: 42,
         verifiedPropertyStops: [
-          { address: '513 S McKenzie St, Mount Vernon, OH', dwellSec: 340, disposition: 'Inspection Scheduled' },
-          { address: '204 E Vine St, Mount Vernon, OH', dwellSec: 185, disposition: 'Knocked · Follow-Up' },
-          { address: '118 N Mulberry St, Mount Vernon, OH', dwellSec: 95, disposition: 'No Answer' },
+          { address: property, dwellSec: 340, disposition: 'Inspection Scheduled' },
+          { address: sample[0]?.address || '204 E Vine St, Mount Vernon, OH 43050', dwellSec: 185, disposition: 'Knocked · Follow-Up' },
+          { address: sample[1]?.address || '118 N Mulberry St, Mount Vernon, OH 43050', dwellSec: 95, disposition: 'No Answer' },
         ],
         voiceCoachScore: 92,
         complianceStatus: 'COMPLIANT',
       };
       break;
+    }
 
-    case 'assign_canvass_shift':
+    case 'assign_canvass_shift': {
+      const { sample } = matchTerritoryLeads(territory);
+      const stopsCount = Number(payload.stopsCount || 18);
       output = {
-        routeId: `rt_${territory.toLowerCase().replace(/\s+/g, '_')}_storm_01`,
+        routeId: `rt_${territory.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_storm_01`,
         assignedTo: repName,
         territory,
-        stopsCount: 18,
-        estimatedDriveAndWalkMin: 115,
-        priorityTier: 'High Hail & Wind Overlap (Score >= 120)',
-        firstThreeStops: [
-          '513 South McKenzie St, Mount Vernon, OH 43050',
-          '312 Coshocton Ave, Mount Vernon, OH 43050',
-          '109 Newark Rd, Mount Vernon, OH 43050',
-        ],
+        stopsCount,
+        estimatedDriveAndWalkMin: Math.round(stopsCount * 6.4),
+        priorityTier: 'High Hail & Wind Overlap (Score >= 128)',
+        firstThreeStops: sample.slice(0, 3).map(s => s.address),
       };
       break;
+    }
 
     case 'triage_storm_leads': {
-      const allLeads = loadRealLeads();
-      const cityFilter = territory.split('(')[0].trim().toLowerCase();
-      const matched = allLeads.filter(l => (l.city || '').toLowerCase().includes(cityFilter));
-      const pool = matched.length >= 3 ? matched : allLeads;
-      const fallbackTopRanked = [
-        {
-          id: 'csv-158467647',
-          homeowner: 'JEFFREY TOWNSEND',
-          address: '7929 MARTINSBURG RD, Mount Vernon, OH 43050-9074',
-          lat: 40.3482712,
-          lng: -82.4358394,
-          stormScore: 144,
-          hailInches: 1.5,
-          stage: 'Untouched',
-        },
-        {
-          id: 'csv-154626719',
-          homeowner: 'CARLA SKAL',
-          address: '20 PARROTT ST, Mount Vernon, OH 43050-4520',
-          lat: 40.3753376,
-          lng: -82.4867023,
-          stormScore: 140,
-          hailInches: 1.5,
-          stage: 'Untouched',
-        },
-        {
-          id: 'csv-156960266',
-          homeowner: 'LAUREL MCDONALD',
-          address: '108 CLIFF ST, Mount Vernon, OH 43050-4148',
-          lat: 40.3816597,
-          lng: -82.4814359,
-          stormScore: 136,
-          hailInches: 1.25,
-          stage: 'Untouched',
-        },
-        {
-          id: 'knox-5128',
-          homeowner: 'HARRINGTON LORI A',
-          address: '6 1/2 BURGESS ST, Mount Vernon, OH 43050',
-          lat: 40.397451,
-          lng: -82.485836,
-          stormScore: 132,
-          hailInches: 1.25,
-          stage: 'Untouched',
-        },
-        {
-          id: 'knox-5129',
-          homeowner: 'SMITH VICTORIA & CODY',
-          address: '300 1/2 CALHOUN ST, Mount Vernon, OH 43050',
-          lat: 40.4010342,
-          lng: -82.4889852,
-          stormScore: 128,
-          hailInches: 1.25,
-          stage: 'Untouched',
-        },
-      ];
-      const sample = pool.length
-        ? pool.slice(0, 5).map((l, idx) => ({
-            id: l.id,
-            homeowner: l.name,
-            address: l.fullAddress || `${l.address}, ${l.city}, ${l.state} ${l.zip}`,
-            lat: l.lat,
-            lng: l.lng,
-            stormScore: 144 - idx * 4,
-            hailInches: idx < 2 ? 1.5 : 1.25,
-            stage: 'Untouched',
-          }))
-        : fallbackTopRanked;
+      const { allLeads, matched, sample } = matchTerritoryLeads(territory);
       output = {
         territory,
         totalCatalogScanned: allLeads.length || 17232,
-        territoryMatchesCount: matched.length || 7566,
+        territoryMatchesCount: matched.length || (territory.toLowerCase().includes('mount vernon') ? 7566 : sample.length),
         highPriorityMatches: Math.min(matched.length || 50, 50),
         topRankedProperties: sample,
       };
@@ -285,19 +324,30 @@ export default async function handler(req, res) {
     }
 
     case 'log_ai_roof_inspection': {
+      const parsed = parseDamageFindings(payload.findings);
       const bundles = Math.ceil(squares * 3);
+      const perimeterLf = Math.round(Math.sqrt(quote.area) * 4);
       output = {
         property,
-        findingsSummary: payload.findings || '6 wind creases · 9 hail bruisings · 3 missing tabs',
-        severity: 'Full Replacement Recommended (Insurance Restorable)',
-        recommendedSystem: 'IKO Dynasty Architectural (Class 3 Impact Rated)',
+        findingsSummary: parsed.text,
+        damageBreakdown: {
+          windCreases: parsed.windCount,
+          hailBruises: parsed.hailCount,
+          missingTabs: parsed.missingCount,
+        },
+        severity: parsed.severity,
+        recommendedSystem: parsed.recommendedSystem,
         materialTakeoff: {
+          roofAreaSqFt: quote.area,
+          wastePct: quote.wastePct,
           squaresWithWaste: squares,
           shingleBundles: bundles,
+          starterStripBundles: Math.max(2, Math.ceil(perimeterLf / 105)),
           iceAndWaterShieldRolls: Math.ceil(squares / 4),
           syntheticUnderlaymentRolls: Math.ceil(squares / 10),
           hipAndRidgeBundles: Math.ceil(squares / 9),
-          dripEdgePieces10ft: Math.ceil(squares * 1.1),
+          dripEdgePieces10ft: Math.ceil((perimeterLf * 1.08) / 10),
+          coilNailsBoxes: Math.max(1, Math.ceil(squares / 15)),
         },
         adminNotificationDispatched: true,
       };
@@ -310,9 +360,11 @@ export default async function handler(req, res) {
         property,
         shingleSpec: 'IKO Dynasty — Glacier / Charcoal Grey',
         squaresScheduled: squares,
+        shingleBundlesStaged: Math.ceil(squares * 3),
         crewLead: 'Spencer Jones (Head of Production)',
         supplierOrderStatus: 'Staged for Rooftop Delivery',
         contractValue: quotedPrice,
+        directCostBudget: directCost,
         status: 'PRODUCTION_SCHEDULED',
       };
       break;
@@ -320,21 +372,20 @@ export default async function handler(req, res) {
     case 'generate_margin_guarded_estimate':
       output = {
         property,
+        roofAreaSqFt: quote.area,
+        wastePct: quote.wastePct,
         squaresWithWaste: squares,
         directCost,
         quotedPrice,
         grossProfit,
-        grossMarginPct: Number(((grossProfit / quotedPrice) * 100).toFixed(1)),
+        grossMarginPct,
         requestedMarginPct,
-        marginFloorClamped: requestedMarginPct < 30,
+        marginFloorClamped,
         projected1099Commission: commission1099,
         setterInspectionBonus: setterBonus,
-        marginGuardrailPassed: true,
-        tiers: {
-          good_iko_cambridge: Number((quotedPrice * 0.93).toFixed(2)),
-          better_iko_dynasty: quotedPrice,
-          best_iko_nordic_impact: Number((quotedPrice * 1.12).toFixed(2)),
-        },
+        marginGuardrailPassed: grossMarginPct >= 30,
+        tiers,
+        tierBreakdown,
       };
       break;
 
@@ -344,7 +395,7 @@ export default async function handler(req, res) {
         contractRevenue: quotedPrice,
         directMaterialAndLaborCost: directCost,
         grossProfit,
-        grossMarginPct: Number(((grossProfit / quotedPrice) * 100).toFixed(1)),
+        grossMarginPct,
         rep1099Commission10PctGP: commission1099,
         setterBookedInspectionBonus: setterBonus,
         netCompanyContribution: Number((grossProfit - commission1099 - setterBonus).toFixed(2)),
@@ -354,14 +405,18 @@ export default async function handler(req, res) {
     case 'reconcile_job_ledger': {
       const depositCollected = Number((quotedPrice * 0.5).toFixed(2));
       const balanceRemaining = Number((quotedPrice - depositCollected).toFixed(2));
+      const supplierInvoiceVerified = Number((directCost * 0.62).toFixed(2));
+      const crewLaborAccrued = Number((directCost - supplierInvoiceVerified).toFixed(2));
       output = {
         property,
         contractTotal: quotedPrice,
         progressDepositCollected: depositCollected,
         accountsReceivableBalance: balanceRemaining,
-        supplierInvoiceVerified: Number((directCost * 0.62).toFixed(2)),
-        crewLaborAccrued: Number((directCost * 0.38).toFixed(2)),
-        realizedGrossMarginPct: Number(((grossProfit / quotedPrice) * 100).toFixed(1)),
+        supplierInvoiceVerified,
+        crewLaborAccrued,
+        totalDirectCostVerified: Number((supplierInvoiceVerified + crewLaborAccrued).toFixed(2)),
+        realizedGrossProfit: grossProfit,
+        realizedGrossMarginPct: grossMarginPct,
         ledgerState: 'BALANCED_AND_AUDITED',
       };
       break;

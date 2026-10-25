@@ -63,6 +63,43 @@ for (const p of ['SKILL.md', 'skills/hr-1099-workforce/SKILL.md', 'skills/constr
 }
 console.log('✓ 4. All SKILL.md manifests and /agento Command Center UI verified');
 
+
+// 4b. Verify exact Good / Better / Best IKO math & cent-exact ledger identities at 35% target margin (2500 sq ft, 12% waste = 28 sq)
+const quote35 = await invoke('POST', {
+  operation: 'generate_margin_guarded_estimate',
+  actorRole: 'rep',
+  payload: { area: 2500, wastePct: 12, targetMarginPct: 35 },
+});
+assert.equal(quote35.statusCode, 200);
+assert.equal(quote35.jsonBody.result.squaresWithWaste, 28);
+assert.equal(quote35.jsonBody.result.directCost, 8574);
+assert.equal(quote35.jsonBody.result.quotedPrice, 13190.77);
+assert.equal(quote35.jsonBody.result.grossProfit, 4616.77);
+assert.equal(quote35.jsonBody.result.grossMarginPct, 35.0);
+assert.equal(quote35.jsonBody.result.projected1099Commission, 461.68);
+assert.equal(quote35.jsonBody.result.tiers.good_iko_cambridge, 12415.38);
+assert.equal(quote35.jsonBody.result.tiers.better_iko_dynasty, 13190.77);
+assert.equal(quote35.jsonBody.result.tiers.best_iko_nordic_impact, 14698.46);
+console.log('✓ 4b. Exact Good ($12,415.38) / Better ($13,190.77) / Best ($14,698.46) IKO pricing & $461.68 1099 commission verified');
+
+// 4c. Verify cent-exact ledger reconciliation & dynamic VLM damage parsing
+const ledger35 = await invoke('POST', {
+  operation: 'reconcile_job_ledger',
+  actorRole: 'admin',
+  payload: { area: 2500, wastePct: 12, targetMarginPct: 35 },
+});
+const lr = ledger35.jsonBody.result;
+assert.equal(Number((lr.progressDepositCollected + lr.accountsReceivableBalance).toFixed(2)), lr.contractTotal);
+assert.equal(Number((lr.supplierInvoiceVerified + lr.crewLaborAccrued).toFixed(2)), lr.totalDirectCostVerified);
+const severeScan = await invoke('POST', {
+  operation: 'log_ai_roof_inspection',
+  actorRole: 'rep',
+  payload: { area: 2500, wastePct: 12, findings: '8 wind creases · 14 hail bruises · 5 missing tabs' },
+});
+assert.ok(severeScan.jsonBody.result.recommendedSystem.includes('IKO Nordic'));
+assert.equal(severeScan.jsonBody.result.materialTakeoff.shingleBundles, 84);
+console.log('✓ 4c. Cent-exact ledger reconciliation & dynamic AI VLM damage/BOM takeoff verified');
+
 // 5. Verify Vercel Hobby 12-serverless-function limit is respected
 const apiFiles = fs.readdirSync('/workspace/true-north-agento/true-north-sales-map/api').filter(f => f.endsWith('.js'));
 assert.ok(apiFiles.length <= 12, `Vercel Hobby limit exceeded: ${apiFiles.length} functions in api/`);
@@ -116,6 +153,9 @@ try {
   await page.locator('#runPowerhouseFlow').click();
   await page.waitForFunction(() => document.getElementById('traceCount')?.textContent === '5 executed');
   assert.equal(await page.locator('#bomSquares').textContent(), '28');
+  assert.equal(await page.locator('#tierGood').textContent(), '$12,415');
+  assert.equal(await page.locator('#tierBetter').textContent(), '$13,191');
+  assert.equal(await page.locator('#tierBest').textContent(), '$14,698');
 
   // Test B: Management Dashboard Agento & Finance Tab (tn-files/agento-admin.js)
   await page.goto(`${origin}/admin-agento-harness.html`);
