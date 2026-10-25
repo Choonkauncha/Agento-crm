@@ -111,6 +111,69 @@ function rememberAdminRole(user, role) {
       localStorage.setItem("tn-role:" + user.id, role);
   } catch (e) {}
 }
+
+function isJudgeDemoAllowed() {
+  return /agento/i.test(location.hostname) || location.hash === "#agento" || new URLSearchParams(location.search).get("demo") === "1";
+}
+async function enterJudgeDemo() {
+  me = { id: "demo-admin", user_id: "demo-admin", name: "Travis Mackie (Co-CEO · Judge Demo)", role: "admin", active: true };
+  reps = [
+    { id: "rep-travis", name: "Travis Mackie", role: "admin", active: true },
+    { id: "rep-spencer", name: "Spencer Jones", role: "admin", active: true },
+    { id: "rep-jordan", name: "Jordan Miller", role: "salesperson", active: true },
+    { id: "rep-alex", name: "Alex Carter", role: "salesperson", active: true },
+    { id: "rep-casey", name: "Casey Brooks", role: "appointment_setter", active: true }
+  ];
+  leads = [
+    { id: "tn-mv-001", name: "513 South McKenzie St", address: "513 South McKenzie St", city: "Mount Vernon", state: "OH", zip: "43050", lat: 40.3888, lng: -82.4842, status: "Appointment" },
+    { id: "tn-mv-002", name: "204 E Vine St", address: "204 E Vine St", city: "Mount Vernon", state: "OH", zip: "43050", lat: 40.3921, lng: -82.4815, status: "Interested" },
+    { id: "tn-fr-001", name: "12 N Main St", address: "12 N Main St", city: "Fredericktown", state: "OH", zip: "43019", lat: 40.4816, lng: -82.5488, status: "Knocked" },
+    { id: "tn-gm-001", name: "106 Gaskin Ave", address: "106 Gaskin Ave", city: "Gambier", state: "OH", zip: "43022", lat: 40.3768, lng: -82.3972, status: "Interested" }
+  ];
+  const nowIso = new Date().toISOString();
+  const tomorrowIso = new Date(Date.now() + 86400000).toISOString();
+  appointments = [
+    { id: "appt-demo-1", lead_id: "tn-mv-001", scheduled_at: tomorrowIso, stage: "Confirmed", notes: "6 wind creases, 9 hail bruises · IKO Dynasty quote ready", canvasser: { name: "Casey Brooks", role: "appointment_setter" }, salesperson: { name: "Jordan Miller", role: "salesperson" }, salesperson_id: "rep-jordan" },
+    { id: "appt-demo-2", lead_id: "tn-gm-001", scheduled_at: tomorrowIso, stage: "Scheduled", notes: "Ridge cap & hail inspection requested", canvasser: { name: "Casey Brooks", role: "appointment_setter" }, salesperson: { name: "Alex Carter", role: "salesperson" }, salesperson_id: "rep-alex" }
+  ];
+  activities = [
+    { id: "act-demo-1", lead_id: "tn-mv-001", actor_id: "rep-jordan", action: "appointment_booked", metadata: { to_status: "Appointment" }, created_at: nowIso, actor: { name: "Jordan Miller" } },
+    { id: "act-demo-2", lead_id: "tn-mv-002", actor_id: "rep-casey", action: "status_changed", metadata: { to_status: "Interested" }, created_at: nowIso, actor: { name: "Casey Brooks" } },
+    { id: "act-demo-3", lead_id: "tn-fr-001", actor_id: "rep-alex", action: "status_changed", metadata: { to_status: "Knocked" }, created_at: nowIso, actor: { name: "Alex Carter" } }
+  ];
+  homes = [
+    { id: "home-demo-1", lead_id: "tn-mv-001", first_name: "Homeowner", last_name: "McKenzie St", phone: "740-507-5599", email: "truenorthrestorationss@gmail.com", address: "513 South McKenzie St", city: "Mount Vernon", state: "OH", zip: "43050", concern: "Visible roof damage", notes: "Hail & wind inspection", source: "Setter Intake", status: "Inspection Scheduled", created_at: nowIso }
+  ];
+  territories = [
+    { id: "terr-mv", name: "Mount Vernon", city: "Mount Vernon", state: "OH", owner: { name: "Jordan Miller", role: "salesperson" } },
+    { id: "terr-fr", name: "Fredericktown", city: "Fredericktown", state: "OH", owner: { name: "Alex Carter", role: "salesperson" } },
+    { id: "terr-gm", name: "Gambier", city: "Gambier", state: "OH", owner: { name: "Casey Brooks", role: "appointment_setter" } }
+  ];
+  mountAgentoAdmin(sb, me);
+  index = dashboardIndex(leads, reps);
+  fillPersonFilter();
+  renderAll();
+  document.documentElement.dataset.tnAdmin = "ready";
+  $("tnAdminHold")?.remove();
+  $("auth").hidden = true;
+  $("app").hidden = false;
+  $("app").classList.remove("hidden");
+  $("welcome").textContent = "Judge Demo Mode (No Credentials Required) · Travis Mackie · Co-CEO & Admin";
+  const refreshed = document.getElementById("dashboardRefreshed");
+  if (refreshed) refreshed.textContent = "Live Agento Judge Demo Active";
+  bindAdminTabs(document, showTab);
+  window.addEventListener("hashchange", () => { if (me) applyAdminHash(); });
+  $("openMap").onclick = () => (location.href = "/?demo=1");
+  $("exportCsv").onclick = exportCsv;
+  $("signOut").textContent = "Agento Hub";
+  $("signOut").onclick = () => (location.href = "/agento.html");
+  if (!state.entered) {
+    state.entered = true;
+    if (adminHashTarget(location.hash).tab) applyAdminHash();
+    else showTab("agento");
+  }
+}
+
 async function boot() {
   try {
     cfg = await fetch("/api/config").then((r) => r.json());
@@ -118,12 +181,14 @@ async function boot() {
     cfg = null;
   }
   if (!cfg || !cfg.configured) {
+    if (isJudgeDemoAllowed()) { await enterJudgeDemo(); return; }
     leaveAdmin();
     return;
   }
   sb = createClient(cfg.url, cfg.publishableKey);
   const g = await sb.auth.getSession();
   if (!g.data.session) {
+    if (isJudgeDemoAllowed()) { await enterJudgeDemo(); return; }
     leaveAdmin();
     return;
   }

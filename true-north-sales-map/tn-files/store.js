@@ -211,13 +211,21 @@ async function loadLeadCache() {
   return leadCache;
 }
 
+const DEMO_KNOX_LEADS = [
+  { id: 'tn-mv-001', name: 'True North HQ / Knox Property', address: '513 South McKenzie St', city: 'Mount Vernon', state: 'OH', zip: '43050', status: 'Appointment' },
+  { id: 'tn-mv-002', name: 'Knox Priority Homeowner', address: '204 E Vine St', city: 'Mount Vernon', state: 'OH', zip: '43050', status: 'Interested' },
+  { id: 'tn-mv-003', name: 'Knox Priority Homeowner', address: '118 N Mulberry St', city: 'Mount Vernon', state: 'OH', zip: '43050', status: 'Knocked' },
+  { id: 'tn-fr-001', name: 'Fredericktown Homeowner', address: '12 N Main St', city: 'Fredericktown', state: 'OH', zip: '43019', status: 'Interested' },
+  { id: 'tn-gm-001', name: 'Gambier Homeowner', address: '106 Gaskin Ave', city: 'Gambier', state: 'OH', zip: '43022', status: 'Appointment' }
+];
 export async function searchLeads(ctx, query) {
   const q = String(query || '').trim();
   if (q.length < 2) return [];
   if (ctx.mode === 'local') {
-    const leads = await loadLeadCache();
+    const cached = await loadLeadCache();
+    const leads = cached.length ? cached : DEMO_KNOX_LEADS;
     const needle = q.toLowerCase();
-    return leads.filter((lead) => `${lead.name || ''} ${lead.address || ''} ${lead.city || ''}`.toLowerCase().includes(needle)).slice(0, 25);
+    return leads.filter((lead) => `${lead.name || ''} ${lead.address || ''} ${lead.city || ''} ${lead.zip || ''}`.toLowerCase().includes(needle)).slice(0, 25);
   }
   const safe = q.replace(/[%_,]/g, ' ');
   const { data, error } = await ctx.sb.from('leads').select('id,name,address,city,state,zip,status,assigned_rep_id,created_by').or(`address.ilike.%${safe}%,name.ilike.%${safe}%,city.ilike.%${safe}%`).limit(25);

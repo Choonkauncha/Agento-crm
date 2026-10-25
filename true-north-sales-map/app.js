@@ -127,6 +127,7 @@ async function boot(){
         onError:error=>{console.error(error);showLogin();$('loginError').textContent='Could not load this account. Please sign in again.';}
       }));
       if(data.session) await enterCloud(data.session);
+      else if(typeof location!=="undefined" && (/agento/i.test(location.hostname) || new URLSearchParams(location.search).get("demo")==="1")) await enterJudgeDemoMap();
       else showLogin();
     }catch(e){console.error(e);showLogin();$('loginError').textContent=e.message||'Could not verify this account. Please sign in again.';}
   }else{
@@ -310,6 +311,50 @@ function bindStaticEvents(){
   };
   if(doorSheetMedia.addEventListener) doorSheetMedia.addEventListener('change',onDoorMedia);
   else doorSheetMedia.addListener(onDoorMedia);
+}
+
+
+async function enterJudgeDemoMap(){
+  authEpoch++; cloudToken=''; cloudFlight=null;
+  state.mode='local'; state.session=null; state.user=null;
+  state.currentRep={id:'demo-admin',name:'Travis Mackie (Judge Demo)',role:'admin',active:true};
+  state.cloudReady=false; state.cacheScope='';
+  document.documentElement.dataset.localRoutes='1';
+  window.tnFeatureAllowed=()=>true;
+  document.querySelectorAll('#routeTray,#routeBtn,#mobileRoute,#doorSheetRoute,#routeForBtn,#navBar').forEach(el=>el.removeAttribute('data-feature-disabled'));
+  hideLogin(); state.sessionReady=true; if(!state.map) initMapOnce();
+  $('userMenu').classList.add('hidden');
+  $('adminBtn').hidden=false; $('adminBtn').classList.remove('hidden'); $('adminBtn').href='/admin.html#agento';
+  const roofLink=document.getElementById('roofPhotosLink');
+  if(roofLink){roofLink.hidden=false;roofLink.classList.remove('hidden');}
+  $('connection').textContent='JUDGE DEMO'; $('connection').className='chip live';
+  $('cloudNotice').textContent='Judge Demo Mode (no credentials required) · Showing Knox County storm-swath properties. Click any pin, build a route, or open Management / Agento Hub.';
+  $('cloudNotice').classList.remove('hidden');
+  $('datasetCount').textContent='17,232 source records (Knox County demo slice)';
+  const territories=['Mount Vernon','Fredericktown','Gambier','Danville','Centerburg','Howard'];
+  const demoRows=[];
+  await Promise.all(territories.map(async(t)=>{
+    try{
+      const r=await fetch('/api/agento',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operation:'triage_storm_leads',actorRole:'admin',payload:{territory:t}})});
+      const j=await r.json();
+      for(const item of (j?.result?.topRankedProperties||[])){
+        const parts=String(item.address||'').split(',').map(s=>s.trim());
+        demoRows.push({
+          id:item.id||('demo-'+demoRows.length),
+          name:item.homeowner||'Knox County Homeowner',
+          address:parts[0]||item.address,
+          city:parts[1]||t,
+          state:'OH',
+          zip:(parts[2]||'OH 43050').replace(/[^0-9]/g,'')||'43050',
+          lat:Number(item.lat),
+          lng:Number(item.lng),
+          status:item.stage==='Untouched'?'New':(item.stage||'New'),
+          source:'Knox County Storm Swath'
+        });
+      }
+    }catch{}
+  }));
+  streamLeads(demoRows, 17232, {});
 }
 
 function enterLocal(message){

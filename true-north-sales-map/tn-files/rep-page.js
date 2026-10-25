@@ -15,7 +15,14 @@ let ctx;
 async function start() {
   ctx = await bootFiles();
   bindSignOut(ctx, document.getElementById("signOut"));
-  if (ctx.mode === "cloud" && !ctx.session) return renderSignIn();
+  if (ctx.mode === "cloud" && !ctx.session) {
+    if (/agento/i.test(location.hostname) || new URLSearchParams(location.search).get("demo") === "1") {
+      ctx.mode = "local";
+      ctx.rep = { id: "demo-rep", role: "salesperson", name: "Jordan Miller (1099 Sales Rep · Judge Demo)" };
+    } else {
+      return renderSignIn();
+    }
+  }
   revealApp();
   render();
 }
