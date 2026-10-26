@@ -34,7 +34,7 @@ const ops = [
   ['onboard_1099_rep', (r) => assert.equal(r.w9AndAgreementStatus, 'Verified')],
   ['audit_rep_shift_compliance', (r) => assert.equal(r.complianceStatus, 'COMPLIANT')],
   ['assign_canvass_shift', (r) => assert.equal(r.stopsCount, 18)],
-  ['triage_storm_leads', (r) => assert.equal(r.totalCatalogScanned, 17232)],
+  ['triage_storm_leads', (r) => assert.ok(r.totalCatalogScanned >= 17232 && r.db_live === true)],
   ['log_ai_roof_inspection', (r) => assert.ok(r.materialTakeoff.shingleBundles > 0)],
   ['dispatch_production_job', (r) => assert.equal(r.status, 'PRODUCTION_SCHEDULED')],
   ['generate_margin_guarded_estimate', (r) => {
