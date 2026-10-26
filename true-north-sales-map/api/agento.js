@@ -266,9 +266,14 @@ export default async function handler(req, res) {
   } catch {
     return res.status(400).json({ error: 'Invalid JSON request body' });
   }
-  const operation = body.operation;
-  const actorRole = (body.actorRole || req.headers['x-agento-role'] || 'admin').toLowerCase();
-  const payload = body.payload || {};
+  const operation = body.operation || body.action;
+  const actorRole = (body.actorRole || body.role || req.headers['x-agento-role'] || 'admin').toLowerCase();
+  const { operation: _op, action: _act, actorRole: _ar, role: _rl, payload: _pl, params: _pr, ...topLevelParams } = body || {};
+  const payload = {
+    ...topLevelParams,
+    ...(typeof body.params === 'object' && body.params ? body.params : {}),
+    ...(typeof body.payload === 'object' && body.payload ? body.payload : {}),
+  };
 
   const spec = OPERATIONS[operation];
   if (!spec) {
